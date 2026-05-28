@@ -4,8 +4,6 @@ import sys
 import webview
 import time
 import os
-
-
 # класс-мост
 class WebviewAPI:
     def __init__(self):
@@ -15,14 +13,11 @@ class WebviewAPI:
         self._window = window
 
     def select_folder(self):
-        """Открывает нативное окно Windows для выбора папки"""
         if self._window:
             result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
             if result:
-                # Возвращаем выбранный путь (он приходит как кортеж или строка)
                 return result[0] if isinstance(result, (list, tuple)) else result
         return None
-
 
 def run_streamlit():
     sys.argv = [
@@ -32,7 +27,6 @@ def run_streamlit():
         "--server.port=8501"
     ]
     stcli.main()
-
 
 if __name__ == "__main__":
     p = multiprocessing.Process(target=run_streamlit)
