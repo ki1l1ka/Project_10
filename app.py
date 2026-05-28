@@ -3,9 +3,14 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import pandas as pd
 import os
+
+# Импортируем вашу логику (убедитесь, что файлы logic.py и main.py лежат рядом)
 from logic import Table, CreatedTable, Graph, NuclearDataVisualizer, TableExcel, TableCreate
+
+# Настройка страницы (должна быть первой командой)
 st.set_page_config(page_title="РАО Аналитика", layout="wide")
-# Стили
+
+# Жесткий горизонтальный фикс разметки и стили интерфейса
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -37,47 +42,42 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Загрузка файлов
+
+# --- 1. ФУНКЦИЯ ДИНАМИЧЕСКОЙ ЗАГРУЗКИ ФАЙЛОВ ИЗ ЛЮБОЙ ПАПКИ ---
 def load_base_excel_files(folder_path):
-    abs_folder_path = os.path.abspath(folder_path)
-
-    if not os.path.exists(abs_folder_path):
-        st.sidebar.error(f"Папка не найдена по пути:\n`{abs_folder_path}`")
+    if not os.path.exists(folder_path):
+        st.error(f"Ошибка: Папка '{folder_path}' не найдена!")
         return None
-
     try:
-        required_files = ['t1', 't2', 't3', 't4']
-        missing_files = []
+        # Проверяем наличие всех обязательных файлов сценария
+        for name in ['t1', 't2', 't3', 't4']:
+            if not os.path.exists(os.path.join(folder_path, f"{name}.xlsx")):
+                st.error(f"В выбранной папке отсутствует обязательный файл {name}.xlsx")
+                return None
 
-        for name in required_files:
-            file_p = os.path.join(abs_folder_path, f"{name}.xlsx")
-            if not os.path.exists(file_p):
-                missing_files.append(f"{name}.xlsx")
-
-        if missing_files:
-            st.sidebar.error(f"В папке `{folder_path}` отсутствуют файлы: {', '.join(missing_files)}")
-            return None
-
+        # Считываем таблицы динамически по переданному пути
         return {
-            't1': Table(pd.read_excel(os.path.join(abs_folder_path, "t1.xlsx"), header=None).to_numpy(),
+            't1': Table(pd.read_excel(os.path.join(folder_path, "t1.xlsx"), header=None).to_numpy(),
                         description="Таблица Т1. Исходные данные по образованию ОЯТ (тонны тяжелого металла)"),
-            't2': Table(pd.read_excel(os.path.join(abs_folder_path, "t2.xlsx"), header=None).to_numpy(),
+            't2': Table(pd.read_excel(os.path.join(folder_path, "t2.xlsx"), header=None).to_numpy(),
                         description="Таблица Т2. Данные по загрузке завода ОЯТ (тонны тяжелого металла)"),
-            't3': Table(pd.read_excel(os.path.join(abs_folder_path, "t3.xlsx"), header=None).to_numpy(),
+            't3': Table(pd.read_excel(os.path.join(folder_path, "t3.xlsx"), header=None).to_numpy(),
                         description="Таблица Т3. Образование РАО различных классов (м³/т ТМ)"),
-            't4': Table(pd.read_excel(os.path.join(abs_folder_path, "t4.xlsx"), header=None).to_numpy(),
+            't4': Table(pd.read_excel(os.path.join(folder_path, "t4.xlsx"), header=None).to_numpy(),
                         description="Таблица Т4. Тепловыделение РАО сразу после переработки (кВт/м³)")
         }
     except Exception as e:
-        st.sidebar.error(f"🚨 Ошибка чтения Excel-файлов: {e}")
+        st.error(f"Ошибка чтения файлов из папки '{folder_path}': {e}")
         return None
 
-# Расчёт матриц
+
+# --- 2. ЧИСТАЯ ФУНКЦИЯ РАСЧЕТА МАТРИЦ ---
 def calculate_nuclear_matrices(tech_idx, s_yr, e_yr, base_data):
     if base_data is None:
         return None
     try:
         import copy
+        # Изолируем данные для текущей итерации ползунков
         data_store = copy.deepcopy(base_data)
 
         t5_key = f't5-{tech_idx}'
@@ -86,70 +86,65 @@ def calculate_nuclear_matrices(tech_idx, s_yr, e_yr, base_data):
         data_store[t6_key] = {}
 
         all_reactors = ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК']
-
-        headers_t5 = ['Завод', '1 класс', '2 класс', '3 класс', '4 класс']
-        headers_t6 = ['Завод', '1 класс', '2 класс', '3 класс', '4 класс']
-        headers_t7 = ["Год", '1 класс', "Готово к захоронению", '2 класс', "Готово к захоронению", '3 класс',
-                      "Готово к захоронению"]
+        headers = {
+            't5': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
+            't6': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
+            't7': ["Год", '1 класс', "Готово к захоронению", '2 класс', "Готово к захоронению", '3 класс',
+                   "Готово к захоронению"]
+        }
+        lines = {'t5': ['Завод'] + all_reactors, 't6': ['Завод', '...']}
 
         for y in range(s_yr, e_yr + 1):
-            # Создаем структуру Т5
-            struct_t5 = [headers_t5] + [[reactor, 0.0, 0.0, 0.0, 0.0] for reactor in all_reactors]
-            data_store[t5_key][y] = CreatedTable(table=struct_t5, description=f"Таблица Т5 за {y} год")
-            try:
-                data_store[t5_key][y].T5Create(t2=data_store['t2'], t3=data_store['t3'], t5=data_store[t5_key][y],
-                                               year=y, technology=tech_idx)
-            except IndexError as e:
-                print(f"⚠️ Ошибка индексов в T5Create за {y} год. Проверьте размеры таблиц T2/T3. Ошибка: {e}")
-            # Создаем структуру Т6
-            struct_t6 = [headers_t6] + [[reactor, 0.0, 0.0, 0.0, 0.0] for reactor in all_reactors]
-            data_store[t6_key][y] = CreatedTable(table=struct_t6, description=f"Таблица Т6 за {y} год")
-            try:
-                data_store[t6_key][y].T6Create(table6=data_store[t6_key][y], tables5=data_store[t5_key],
-                                               table4=data_store['t4'], year=y, technology=tech_idx)
-            except (IndexError, ZeroDivisionError) as e:
-                print(f"⚠️ Ошибка в T6Create за {y} год. Проверьте таблицу T4 или деление на ноль. Ошибка: {e}")
+            data_store[t5_key][y] = CreatedTable(TableCreate(headers['t5'], lines['t5']))
+            data_store[t5_key][y].T5Create(t2=data_store['t2'], t3=data_store['t3'], t5=data_store[t5_key][y], year=y,
+                                           technology=tech_idx)
+
+            data_store[t6_key][y] = CreatedTable(TableCreate(headers['t6'], lines['t6']))
+            data_store[t6_key][y].T6Create(table6=data_store[t6_key][y], tables5=data_store[t5_key],
+                                           table4=data_store['t4'], year=y, technology=tech_idx)
 
         # Расчет Т7
-        struct_t7 = [headers_t7]
-        data_store['t7'] = CreatedTable(table=struct_t7, description="Итоговая таблица Т7")
-        try:
-            data_store['t7'].T7Create(data_store['t4'], data_store[t5_key], data_store['t7'], technology=tech_idx,
-                                      startyear=s_yr, endyear=e_yr)
-        except IndexError as e:
-            print(f"⚠️ Ошибка индексов в T7Create. Проверьте структуру итоговых расчетов. Ошибка: {e}")
+        data_store['t7'] = CreatedTable(TableCreate(headers['t7']))
+        data_store['t7'].T7Create(data_store['t4'], data_store[t5_key], data_store['t7'], technology=tech_idx,
+                                  startyear=s_yr, endyear=e_yr)
 
         return data_store
     except Exception as e:
         st.error(f"Ошибка вычислений в ядре: {e}")
         return None
 
-# Окно выбора
+
+# --- 3. ИНИЦИАЛИЗАЦИЯ И ОБРАБОТКА ДИАЛОГОВЫХ ОКНО ВЫБОРА ---
 if 'report_status' not in st.session_state:
     st.session_state.report_status = ""
 if 'excel_folder_path' not in st.session_state:
     st.session_state.excel_folder_path = "excel"  # Папка по умолчанию при первом старте
 
+# Перехватываем путь, который пользователь выбрал в проводнике Windows через run.py
 if "selected_dir" in st.query_params:
     st.session_state.excel_folder_path = st.query_params["selected_dir"]
     st.query_params.clear()  # Очищаем параметры, чтобы избежать зацикливания окон
-
+# ==========================================
+# ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ
+# ==========================================
 with st.container():
+    # Делим верхнюю строку на текстовое поле ввода пути и кнопки действий
     tb_col_path, tb_col2, tb_col3, tb_col4 = st.columns([5.5, 1.5, 1.5, 1.5])
 
     with tb_col_path:
-        # Интерактивное текстовое поле
+        # Интерактивное текстовое поле для ввода адреса папки со сценарием
         input_folder = st.text_input(
             "Путь к папке данных сценария:",
             value=st.session_state.excel_folder_path,
             placeholder="Пример: C:\\Users\\Name\\Desktop\\Новый_Сценарий",
             help="Укажите полный путь к папке, где лежат ваши файлы t1.xlsx - t4.xlsx"
         )
+        # Если пользователь ввел новый путь, фиксируем его в оперативной памяти программы
         if input_folder != st.session_state.excel_folder_path:
             if os.path.exists(input_folder):
                 st.session_state.excel_folder_path = input_folder
                 st.toast(f"Папка переключена на: {input_folder}")
-                st.rerun()
+                st.rerun()  # Мгновенно заставляем интерфейс пересчитать Т1-Т7 по новому адресу
             else:
                 st.error("Указанный путь к папке не найден в файловой системе!")
 
@@ -162,8 +157,12 @@ with st.container():
 
 st.divider()
 
+# ==========================================
+# ГОРИЗОНТАЛЬНЫЙ МАКЕТ С ПАНЕЛЯМИ
+# ==========================================
 col_left, col_center, col_right = st.columns([2.5, 6.5, 3.0], gap="large")
 
+# --- ЛЕВАЯ КОЛОНКА ---
 with col_left:
     st.markdown("### Панель управления")
     db_loaded = st.button("База данных", use_container_width=True)
@@ -184,14 +183,18 @@ with col_left:
         "Установки в фокусе:", options=all_reactors, default=all_reactors
     )
 
-    # Показываем текущий выбранный путь
+    # Показываем инженеру текущий выбранный путь к файлам для визуального контроля
     st.divider()
     st.caption(f"📁 Источник данных: {st.session_state.excel_folder_path}")
 
+# --- УПРАВЛЕНИЕ ПОТОКАМИ ДАННЫХ И РАСЧЕТОМ ---
+# Шаг А: Считываем чистые Excel-таблицы из активной папки
 base_excel_tables = load_base_excel_files(st.session_state.excel_folder_path)
 
+# Шаг Б: Запускаем математический расчет ядра
 tables = calculate_nuclear_matrices(technology, start_yr, end_yr, base_excel_tables)
 
+# --- ЦЕНТРАЛЬНАЯ КОЛОНКА ---
 with col_center:
     st.markdown("### Рабочая область")
 
@@ -209,130 +212,49 @@ with col_center:
     table_key = matrix_options[selected_label]
 
     active_table_obj = None
-
-    # Гарантируем, что если расчетные таблицы еще не готовы, мы можем посмотреть хотя бы базовые (Т1-Т4)
-    source_data = tables if tables is not None else base_excel_tables
-
-    if source_data is not None:
+    if tables is not None:
         if "t5" in table_key or "t6" in table_key:
-            yearly_dict = source_data.get(table_key)
-            if yearly_dict and isinstance(yearly_dict, dict):
-                # выпадающий список выбора года
-                selected_year = st.selectbox(
-                    "Выберите год для отображения данных:",
-                    options=list(range(start_yr, end_yr + 1)),
-                    key=f"year_selector_{table_key}"
-                )
-                active_table_obj = yearly_dict.get(selected_year)
+            selected_year = st.selectbox("Выберите год для отображения данных:",
+                                         options=list(range(start_yr, end_yr + 1)))
+            active_table_obj = tables[table_key].get(selected_year)
         else:
-            active_table_obj = source_data.get(table_key)
+            active_table_obj = tables.get(table_key)
 
     tab_table, tab_graph, tab_sensitivity = st.tabs(
         ["Табличный вид", "Графическое отображение", "Анализ чувствительности"])
 
     with tab_table:
-        if tables is not None and active_table_obj is not None:
+        if active_table_obj is not None:
+            # 1. Извлекаем матрицу из объектов Cell
             raw_matrix = [[cell.value for cell in row] for row in active_table_obj.matrix]
 
             if len(raw_matrix) > 0:
+                # Определяем реальное максимальное количество колонок в строках данных
+                max_cols = max(len(row) for row in raw_matrix)
 
-                if table_key in ["t3", "t4"]:
-                    first_row_matrix = raw_matrix[0]
-                    raw_headers = [str(h).strip() if h is not None else "" for h in first_row_matrix]
-                    headers = [h if h.lower() not in ["nan", "none", ""] else "Реактор" for h in raw_headers]
+                # 2. ИСПРАВЛЕНИЕ: Формируем заголовки колонок СТРОГО из ПЕРВОЙ строки (индекс 0)
+                headers = []
+                first_row = raw_matrix[0]  # Сюда обязательно добавляем [0]
 
-                    body_data = []
-                    for row in raw_matrix[1:]:
-                        if len(row) == 0:
-                            continue
-                        row_label = str(row[0]).strip()
+                for cell_val in first_row:
+                    if cell_val is None:
+                        val_str = ""
+                    elif isinstance(cell_val, (list, tuple)):
+                        val_str = " ".join([str(v).strip() for v in cell_val if v is not None])
+                    else:
+                        val_str = str(cell_val).strip()
 
-                        # Фильтр строк
-                        if row_label in selected_reactors or row_label.lower() in ['всего', 'итого', 'сумма', 'завод',
-                                                                                   '']:
-                            new_row = ["" if cell_val is None or str(cell_val).lower() in ["nan", "none"] else cell_val
-                                       for cell_val in row]
-                            body_data.append(new_row)
+                    if val_str.lower() == "nan" or val_str == "None":
+                        val_str = ""
+                    headers.append(val_str)
 
-                elif "t5" in table_key or "t6" in table_key:
-                    first_row_matrix = raw_matrix[0]
-                    raw_headers = [str(cell_val).strip() if cell_val is not None else "" for cell_val in
-                                   first_row_matrix]
+                # Если в строках данных колонок больше, чем в строке заголовков, дополняем невидимыми
+                if len(headers) < max_cols:
+                    headers.extend([""] * (max_cols - len(headers)))
+                elif len(headers) > max_cols:
+                    headers = headers[:max_cols]
 
-                    total_col_idx = None
-                    for idx, h in enumerate(raw_headers):
-                        if h.lower() in ['всего', 'итого', 'сумма']:
-                            total_col_idx = idx
-                            break
-
-                    col_indices_to_keep = [0]
-                    for idx, h in enumerate(raw_headers):
-                        if idx == 0:
-                            continue
-                        if h in selected_reactors:
-                            col_indices_to_keep.append(idx)
-
-                    if total_col_idx is not None and total_col_idx not in col_indices_to_keep:
-                        col_indices_to_keep.append(total_col_idx)
-
-                    body_data = []
-                    for row in raw_matrix[1:]:
-                        if len(row) == 0:
-                            continue
-
-                        new_total = 0.0
-                        has_numeric_data = False
-                        for idx, h in enumerate(raw_headers):
-                            if idx == 0 or idx == total_col_idx:
-                                continue
-                            if h in selected_reactors and idx < len(row):
-                                try:
-                                    val = float(row[idx] or 0)
-                                    new_total += val
-                                    has_numeric_data = True
-                                except (ValueError, TypeError):
-                                    pass
-
-                        filtered_row = []
-                        for idx in col_indices_to_keep:
-                            if idx < len(row):
-                                if idx == total_col_idx:
-                                    filtered_row.append(round(new_total, 1) if has_numeric_data else "")
-                                else:
-                                    cell_val = row[idx]
-                                    filtered_row.append("" if cell_val is None or str(cell_val).lower() in ["nan",
-                                                                                                            "none"] else cell_val)
-                            else:
-                                filtered_row.append("")
-                        body_data.append(filtered_row)
-
-                    headers = [raw_headers[idx] for idx in col_indices_to_keep if idx < len(raw_headers)]
-
-
-                else:
-                    first_row_matrix = raw_matrix[0]
-                    raw_headers = [str(cell_val).strip() if cell_val is not None else "" for cell_val in
-                                   first_row_matrix]
-
-                    body_data = []
-                    for row in raw_matrix[1:]:
-                        if len(row) == 0:
-                            continue
-
-                        # фильтрация строк по диапазону лет
-                        try:
-                            row_year = int(float(row[0]))
-                            if not (start_yr <= row_year <= end_yr):
-                                continue
-                        except (ValueError, TypeError):
-                            pass
-
-                        new_row = ["" if cell_val is None or str(cell_val).lower() in ["nan", "none"] else cell_val for
-                                   cell_val in row]
-                        body_data.append(new_row)
-
-                    headers = raw_headers
-
+                # Добавляем уникальное количество невидимых пробелов для дубликатов и пустых ячеек
                 seen = {}
                 for idx, h in enumerate(headers):
                     if h in seen:
@@ -341,12 +263,30 @@ with col_center:
                     else:
                         seen[h] = 0
 
-                if len(body_data) > 0:
-                    df_display = pd.DataFrame(body_data, columns=headers)
-                    st.dataframe(df_display, use_container_width=True, hide_index=True, height=380,
-                                 key=f"df_isolated_{table_key}_{start_yr}_{end_yr}_{technology}_{'_'.join(selected_reactors)}")
-                else:
-                    st.info("В выбранном диапазоне параметров нет данных.")
+                # 3. Формируем тело таблицы (со второй строки, индекс 1)
+                body_data = []
+                for row in raw_matrix[1:]:
+                    if len(row) == 0:
+                        continue
+
+                    new_row = []
+                    for cell_val in row:
+                        if cell_val is None or str(cell_val).lower() == "nan" or str(cell_val) == "None":
+                            new_row.append("")
+                        else:
+                            new_row.append(cell_val)
+
+                    if len(new_row) < max_cols:
+                        new_row.extend([""] * (max_cols - len(new_row)))
+                    elif len(new_row) > max_cols:
+                        new_row = new_row[:max_cols]
+
+                    body_data.append(new_row)
+
+                # 4. Создаем чистый плоский DataFrame и выводим на экран
+                df_display = pd.DataFrame(body_data, columns=headers)
+                st.dataframe(df_display, use_container_width=True, hide_index=True, height=380,
+                             key=f"df_{table_key}_{start_yr}_{end_yr}_{technology}")
             else:
                 st.info("Выбранная таблица пуста.")
         else:
@@ -405,7 +345,7 @@ with col_center:
                     plt.close()
                     st.success("Моделирование чувствительности успешно завершено!")
 
-# правая колонка
+# --- ПРАВАЯ КОЛОНКА ---
 with col_right:
     st.markdown("### Параметры конфигурации")
     if st.button("Зафиксировать конфигурацию", use_container_width=True):

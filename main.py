@@ -237,6 +237,3 @@ def CreateWordReport(sensitivity_data=None, tech_num=1):
 
     doc.save(filename)
     print(f"Готово! Отчет сохранен: {filename}")
-
-
-CreateWordReport()
