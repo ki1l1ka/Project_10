@@ -3,14 +3,16 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 import pandas as pd
 import os
+from logic import *
+import streamlit as st
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
+import pandas as pd
+import os
+from office import CreateWordReport
 
-# Импортируем вашу логику (убедитесь, что файлы logic.py и main.py лежат рядом)
-from logic import Table, CreatedTable, Graph, NuclearDataVisualizer, TableExcel, TableCreate
-
-# Настройка страницы (должна быть первой командой)
 st.set_page_config(page_title="РАО Аналитика", layout="wide")
 
-# Жесткий горизонтальный фикс разметки и стили интерфейса
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -43,156 +45,138 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 
-# --- 1. ФУНКЦИЯ ДИНАМИЧЕСКОЙ ЗАГРУЗКИ ФАЙЛОВ ИЗ ЛЮБОЙ ПАПКИ ---
-def load_base_excel_files(folder_path):
-    if not os.path.exists(folder_path):
-        st.error(f"Ошибка: Папка '{folder_path}' не найдена!")
+def load_base_excel_files(folder_name, plant_name):
+    full_path = os.path.join("excel", folder_name)
+
+    if not os.path.exists(full_path):
+        st.error(f"Ошибка: Папка '{full_path}' не найдена в директории 'excel'!")
         return None
     try:
-        # Проверяем наличие всех обязательных файлов сценария
-        for name in ['t1', 't2', 't3', 't4']:
-            if not os.path.exists(os.path.join(folder_path, f"{name}.xlsx")):
-                st.error(f"В выбранной папке отсутствует обязательный файл {name}.xlsx")
-                return None
-
-        # Считываем таблицы динамически по переданному пути
-        return {
-            't1': Table(pd.read_excel(os.path.join(folder_path, "t1.xlsx"), header=None).to_numpy(),
-                        description="Таблица Т1. Исходные данные по образованию ОЯТ (тонны тяжелого металла)"),
-            't2': Table(pd.read_excel(os.path.join(folder_path, "t2.xlsx"), header=None).to_numpy(),
-                        description="Таблица Т2. Данные по загрузке завода ОЯТ (тонны тяжелого металла)"),
-            't3': Table(pd.read_excel(os.path.join(folder_path, "t3.xlsx"), header=None).to_numpy(),
-                        description="Таблица Т3. Образование РАО различных классов (м³/т ТМ)"),
-            't4': Table(pd.read_excel(os.path.join(folder_path, "t4.xlsx"), header=None).to_numpy(),
-                        description="Таблица Т4. Тепловыделение РАО сразу после переработки (кВт/м³)")
-        }
+        plant_obj = ProcessingPlant(name=plant_name, folder_path=full_path)
+        return plant_obj
     except Exception as e:
-        st.error(f"Ошибка чтения файлов из папки '{folder_path}': {e}")
+        st.error(f"Ошибка инициализации завода из папки '{full_path}': {e}")
         return None
 
-
-# --- 2. ЧИСТАЯ ФУНКЦИЯ РАСЧЕТА МАТРИЦ ---
-def calculate_nuclear_matrices(tech_idx, s_yr, e_yr, base_data):
-    if base_data is None:
-        return None
-    try:
-        import copy
-        # Изолируем данные для текущей итерации ползунков
-        data_store = copy.deepcopy(base_data)
-
-        t5_key = f't5-{tech_idx}'
-        t6_key = f't6-{tech_idx}'
-        data_store[t5_key] = {}
-        data_store[t6_key] = {}
-
-        all_reactors = ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК']
-        headers = {
-            't5': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
-            't6': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
-            't7': ["Год", '1 класс', "Готово к захоронению", '2 класс', "Готово к захоронению", '3 класс',
-                   "Готово к захоронению"]
-        }
-        lines = {'t5': ['Завод'] + all_reactors, 't6': ['Завод', '...']}
-
-        for y in range(s_yr, e_yr + 1):
-            data_store[t5_key][y] = CreatedTable(TableCreate(headers['t5'], lines['t5']))
-            data_store[t5_key][y].T5Create(t2=data_store['t2'], t3=data_store['t3'], t5=data_store[t5_key][y], year=y,
-                                           technology=tech_idx)
-
-            data_store[t6_key][y] = CreatedTable(TableCreate(headers['t6'], lines['t6']))
-            data_store[t6_key][y].T6Create(table6=data_store[t6_key][y], tables5=data_store[t5_key],
-                                           table4=data_store['t4'], year=y, technology=tech_idx)
-
-        # Расчет Т7
-        data_store['t7'] = CreatedTable(TableCreate(headers['t7']))
-        data_store['t7'].T7Create(data_store['t4'], data_store[t5_key], data_store['t7'], technology=tech_idx,
-                                  startyear=s_yr, endyear=e_yr)
-
-        return data_store
-    except Exception as e:
-        st.error(f"Ошибка вычислений в ядре: {e}")
-        return None
-
-
-# --- 3. ИНИЦИАЛИЗАЦИЯ И ОБРАБОТКА ДИАЛОГОВЫХ ОКНО ВЫБОРА ---
 if 'report_status' not in st.session_state:
     st.session_state.report_status = ""
-if 'excel_folder_path' not in st.session_state:
-    st.session_state.excel_folder_path = "excel"  # Папка по умолчанию при первом старте
 
-# Перехватываем путь, который пользователь выбрал в проводнике Windows через run.py
-if "selected_dir" in st.query_params:
-    st.session_state.excel_folder_path = st.query_params["selected_dir"]
-    st.query_params.clear()  # Очищаем параметры, чтобы избежать зацикливания окон
-# ==========================================
-# ВЕРХНЯЯ ПАНЕЛЬ ИНСТРУМЕНТОВ
-# ==========================================
+# путь
+if 'plants_data' not in st.session_state:
+    st.session_state.plants_data = {
+        1: {
+            "name": "Завод 1",
+            "folder_path": "Завод 1",
+            "technology": 1,
+            "start_yr": 2030,
+            "end_yr": 2050,
+            "selected_reactors": ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК'],
+            "current_min_pct": 50,
+            "current_max_pct": 150
+        }
+    }
+
+if 'active_plant_id' not in st.session_state:
+    st.session_state.active_plant_id = 1
+if 'next_plant_id' not in st.session_state:
+    st.session_state.next_plant_id = 2
+
 with st.container():
-    # Делим верхнюю строку на текстовое поле ввода пути и кнопки действий
-    tb_col_path, tb_col2, tb_col3, tb_col4 = st.columns([5.5, 1.5, 1.5, 1.5])
+    num_plants = len(st.session_state.plants_data)
+    top_cols = st.columns([1.5, 3.5] + [1.0] * num_plants + [1.0])
 
-    with tb_col_path:
-        # Интерактивное текстовое поле для ввода адреса папки со сценарием
+    with top_cols[0]:
+        if st.button("Добавить завод", use_container_width=True):
+            new_id = st.session_state.next_plant_id
+            st.session_state.plants_data[new_id] = {
+                "name": f"Завод {new_id}",
+                "folder_path": "excel",
+                "technology": 1,
+                "start_yr": 2030,
+                "end_yr": 2050,
+                "selected_reactors": ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК'],
+                "current_min_pct": 50,
+                "current_max_pct": 150
+            }
+            st.session_state.active_plant_id = new_id
+            st.session_state.next_plant_id += 1
+            st.rerun()
+
+    active_id = st.session_state.active_plant_id
+    current_config = st.session_state.plants_data[active_id]
+
+    with top_cols[1]:
         input_folder = st.text_input(
-            "Путь к папке данных сценария:",
-            value=st.session_state.excel_folder_path,
-            placeholder="Пример: C:\\Users\\Name\\Desktop\\Новый_Сценарий",
-            help="Укажите полный путь к папке, где лежат ваши файлы t1.xlsx - t4.xlsx"
+            "Название папки завода:",
+            value=current_config["folder_path"],
+            placeholder="Например: Завод 1",
+            label_visibility="collapsed",
+            key=f"path_input_{active_id}"
         )
-        # Если пользователь ввел новый путь, фиксируем его в оперативной памяти программы
-        if input_folder != st.session_state.excel_folder_path:
-            if os.path.exists(input_folder):
-                st.session_state.excel_folder_path = input_folder
-                st.toast(f"Папка переключена на: {input_folder}")
-                st.rerun()  # Мгновенно заставляем интерфейс пересчитать Т1-Т7 по новому адресу
+        if input_folder != current_config["folder_path"]:
+            check_path = os.path.join("excel", input_folder)
+            if os.path.exists(check_path):
+                st.session_state.plants_data[active_id]["folder_path"] = input_folder
+                st.toast(f"Для '{current_config['name']}' установлена папка: excel/{input_folder}")
+                st.rerun()
             else:
-                st.error("Указанный путь к папке не найден в файловой системе!")
+                st.error(f"Папка 'excel/{input_folder}' не найдена!")
 
-    with tb_col2:
-        st.button("Правка", use_container_width=True, disabled=True)
-    with tb_col3:
-        st.button("Вид", use_container_width=True, disabled=True)
-    with tb_col4:
-        st.button("Справка", use_container_width=True, disabled=True)
+    col_idx = 2
+    for p_id, p_info in st.session_state.plants_data.items():
+        with top_cols[col_idx]:
+            btn_type = "primary" if p_id == active_id else "secondary"
+            if st.button(p_info["name"], key=f"tab_btn_{p_id}", use_container_width=True, type=btn_type):
+                st.session_state.active_plant_id = p_id
+                st.rerun()
+        col_idx += 1
 
 st.divider()
 
-# ==========================================
-# ГОРИЗОНТАЛЬНЫЙ МАКЕТ С ПАНЕЛЯМИ
-# ==========================================
 col_left, col_center, col_right = st.columns([2.5, 6.5, 3.0], gap="large")
-
-# --- ЛЕВАЯ КОЛОНКА ---
 with col_left:
     st.markdown("### Панель управления")
     db_loaded = st.button("База данных", use_container_width=True)
 
     st.divider()
     st.markdown("**Выборка данных для расчета**")
-    technology = st.selectbox("Технология переработки:", options=[1, 2], index=0)
+
+    technology = st.selectbox(
+        "Технология переработки:",
+        options=[1, 2],
+        index=current_config["technology"] - 1,
+        key=f"tech_sel_{active_id}"
+    )
+    st.session_state.plants_data[active_id]["technology"] = technology
 
     start_yr, end_yr = st.slider(
         "Временной диапазон (годы):",
-        min_value=2030, max_value=2050, value=(2030, 2050), step=1
+        min_value=2030, max_value=2050,
+        value=(current_config["start_yr"], current_config["end_yr"]),
+        step=1,
+        key=f"slider_{active_id}"
     )
+    st.session_state.plants_data[active_id]["start_yr"] = start_yr
+    st.session_state.plants_data[active_id]["end_yr"] = end_yr
 
     st.divider()
     st.markdown("**Инструменты и реакторы**")
     all_reactors = ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК']
+
     selected_reactors = st.multiselect(
-        "Установки в фокусе:", options=all_reactors, default=all_reactors
+        "Установки в фокусе:",
+        options=all_reactors,
+        default=current_config["selected_reactors"],
+        key=f"reactors_{active_id}"
     )
+    st.session_state.plants_data[active_id]["selected_reactors"] = selected_reactors
 
-    # Показываем инженеру текущий выбранный путь к файлам для визуального контроля
     st.divider()
-    st.caption(f"📁 Источник данных: {st.session_state.excel_folder_path}")
+    st.caption(f"Источник данных: {current_config['folder_path']}")
+plant = load_base_excel_files(current_config["folder_path"], current_config["name"])
 
-# --- УПРАВЛЕНИЕ ПОТОКАМИ ДАННЫХ И РАСЧЕТОМ ---
-# Шаг А: Считываем чистые Excel-таблицы из активной папки
-base_excel_tables = load_base_excel_files(st.session_state.excel_folder_path)
-
-# Шаг Б: Запускаем математический расчет ядра
-tables = calculate_nuclear_matrices(technology, start_yr, end_yr, base_excel_tables)
+if plant is not None:
+    plant.calculate_matrices(technology=technology, start_year=start_yr, end_year=end_yr)
 
 # --- ЦЕНТРАЛЬНАЯ КОЛОНКА ---
 with col_center:
@@ -203,39 +187,60 @@ with col_center:
         "Таблица Т2 (Загрузка завода)": "t2",
         "Таблица Т3 (Нормативы образования РАО)": "t3",
         "Таблица Т4 (Удельное тепловыделение)": "t4",
-        "Таблица Т5 (Объемы РАО по годам)": f"t5-{technology}",
-        "Таблица Т6 (Среднее тепловыделение РАО)": f"t6-{technology}",
+        "Таблица Т5 (Объемы РАО по годам)": "t5_series",
+        "Таблица Т6 (Среднее тепловыделение РАО)": "t6_series",
         "Таблица Т7 (Итоговая накопительная)": "t7"
     }
 
     selected_label = st.selectbox("Выберите активную таблицу для отображения:", options=list(matrix_options.keys()))
-    table_key = matrix_options[selected_label]
-
+    table_field_name = matrix_options[selected_label]
     active_table_obj = None
-    if tables is not None:
-        if "t5" in table_key or "t6" in table_key:
-            selected_year = st.selectbox("Выберите год для отображения данных:",
-                                         options=list(range(start_yr, end_yr + 1)))
-            active_table_obj = tables[table_key].get(selected_year)
+    selected_year = "all"
+
+    if plant is not None:
+        if "series" in table_field_name:
+            available_years = list(range(start_yr, end_yr + 1))
+            selected_year = st.selectbox(
+                "Выберите год для отображения данных:",
+                options=available_years,
+                key=f"year_selector_{table_field_name}_{active_id}"
+            )
+
+            plant_series_dict = getattr(plant, table_field_name)
+
+            if not isinstance(plant_series_dict, dict):
+                plant_series_dict = {1: {}, 2: {}}
+                setattr(plant, table_field_name, plant_series_dict)
+
+            if technology not in plant_series_dict or not plant_series_dict[technology]:
+                plant.calculate_matrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                plant_series_dict = getattr(plant, table_field_name)
+
+            tech_dict = plant_series_dict.get(technology, {})
+
+            active_table_obj = tech_dict.get(selected_year)
         else:
-            active_table_obj = tables.get(table_key)
+            active_table_obj = getattr(plant, table_field_name)
+            if table_field_name == "t7" and active_table_obj is not None:
+                if isinstance(active_table_obj, dict):
+                    if technology not in active_table_obj or active_table_obj[technology] is None:
+                        plant.calculate_matrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                        active_table_obj = getattr(plant, "t7")
+                    active_table_obj = active_table_obj.get(technology)
+                else:
+                    pass
 
     tab_table, tab_graph, tab_sensitivity = st.tabs(
-        ["Табличный вид", "Графическое отображение", "Анализ чувствительности"])
-
+        ["Табличный вид", "Графическое отображение", "Анализ чувствительности"]
+    )
     with tab_table:
         if active_table_obj is not None:
-            # 1. Извлекаем матрицу из объектов Cell
             raw_matrix = [[cell.value for cell in row] for row in active_table_obj.matrix]
 
             if len(raw_matrix) > 0:
-                # Определяем реальное максимальное количество колонок в строках данных
                 max_cols = max(len(row) for row in raw_matrix)
-
-                # 2. ИСПРАВЛЕНИЕ: Формируем заголовки колонок СТРОГО из ПЕРВОЙ строки (индекс 0)
                 headers = []
-                first_row = raw_matrix[0]  # Сюда обязательно добавляем [0]
-
+                first_row = raw_matrix[0]
                 for cell_val in first_row:
                     if cell_val is None:
                         val_str = ""
@@ -247,14 +252,10 @@ with col_center:
                     if val_str.lower() == "nan" or val_str == "None":
                         val_str = ""
                     headers.append(val_str)
-
-                # Если в строках данных колонок больше, чем в строке заголовков, дополняем невидимыми
                 if len(headers) < max_cols:
                     headers.extend([""] * (max_cols - len(headers)))
                 elif len(headers) > max_cols:
                     headers = headers[:max_cols]
-
-                # Добавляем уникальное количество невидимых пробелов для дубликатов и пустых ячеек
                 seen = {}
                 for idx, h in enumerate(headers):
                     if h in seen:
@@ -262,13 +263,10 @@ with col_center:
                         headers[idx] = h + (" " * seen[h])
                     else:
                         seen[h] = 0
-
-                # 3. Формируем тело таблицы (со второй строки, индекс 1)
                 body_data = []
                 for row in raw_matrix[1:]:
                     if len(row) == 0:
                         continue
-
                     new_row = []
                     for cell_val in row:
                         if cell_val is None or str(cell_val).lower() == "nan" or str(cell_val) == "None":
@@ -280,25 +278,27 @@ with col_center:
                         new_row.extend([""] * (max_cols - len(new_row)))
                     elif len(new_row) > max_cols:
                         new_row = new_row[:max_cols]
-
                     body_data.append(new_row)
-
-                # 4. Создаем чистый плоский DataFrame и выводим на экран
                 df_display = pd.DataFrame(body_data, columns=headers)
-                st.dataframe(df_display, use_container_width=True, hide_index=True, height=380,
-                             key=f"df_{table_key}_{start_yr}_{end_yr}_{technology}")
+                st.dataframe(
+                    df_display, use_container_width=True, hide_index=True, height=380,
+                    key=f"df_{table_field_name}_{start_yr}_{end_yr}_{technology}_{selected_year}"
+                )
             else:
                 st.info("Выбранная таблица пуста.")
         else:
             st.info("Данные отсутствуют или база данных не инициализирована.")
 
     with tab_graph:
-        if tables is not None:
+        if plant is not None:
             fig, ax = plt.subplots(figsize=(9, 4.0))
             years_range = list(range(start_yr, end_yr + 1))
-            if table_key == "t7":
+            t7_field = getattr(plant, "t7", {})
+            active_t7_obj = t7_field.get(technology) if isinstance(t7_field, dict) else t7_field
+
+            if table_field_name == "t7" and active_t7_obj is not None:
                 for cl_idx, cl_name in [(1, "1 кл (Всего)"), (2, "1 кл (Готово)")]:
-                    y_vals = [float(tables['t7'].matrix[r][cl_idx].value) for r in range(1, len(tables['t7'].matrix))]
+                    y_vals = [float(active_t7_obj.matrix[r][cl_idx].value) for r in range(1, len(active_t7_obj.matrix))]
                     ax.plot(years_range, y_vals, marker='o', label=cl_name, linewidth=2)
             else:
                 for reactor in selected_reactors:
@@ -306,6 +306,7 @@ with col_center:
 
                     volumes = np.cumsum(np.random.randint(15, 60, len(years_range)))
                     ax.plot(years_range, volumes, marker='o', label=reactor, linewidth=2)
+
             ax.set_xlabel("Годы", fontsize=10)
             ax.set_ylabel("Значение показателей", fontsize=10)
             ax.grid(True, linestyle='--', alpha=0.5)
@@ -314,63 +315,86 @@ with col_center:
             st.pyplot(fig, clear_figure=True)
             plt.close()
 
-    with tab_sensitivity:
-        st.markdown("### Анализ чувствительности объемов РАО 1 класса к 2050 году")
-        sens_range = st.slider("Диапазон изменения тепловыделения (% от номинала):", min_value=10, max_value=300,
-                               value=(50, 150), step=5)
-        min_p, max_p = sens_range
-        st.session_state.current_min_pct = min_p
-        st.session_state.current_max_pct = max_p
+        with tab_sensitivity:
+            st.markdown("### Анализ чувствительности объемов РАО 1 класса к конечному году")
+            sens_range = st.slider("Диапазон изменения тепловыделения (% от номинала):", min_value=10, max_value=300,
+                                   value=(50, 150), step=5)
+            min_p, max_p = sens_range
+            st.session_state.current_min_pct = min_p
+            st.session_state.current_max_pct = max_p
 
-        if st.button("Запустить симуляцию анализа чувствительности", type="secondary"):
-            with st.spinner("Выполнение итерационного пересчета моделей в логическом ядре..."):
-                x_percent, y_volumes = tables['t7'].RunSensitivityAnalysis(
-                    base_t4=tables['t4'], tables_t5_dict=tables[f't5-{technology}'],
-                    table_t2=tables['t2'], table_t3=tables['t3'], technology=technology,
-                    start_year=start_yr, end_year=end_yr, min_pct=min_p, max_pct=max_p
-                )
-                if x_percent and y_volumes:
-                    fig_sens, ax_sens = plt.subplots(figsize=(9, 4.2))
-                    ax_sens.plot(x_percent, y_volumes, marker='s', color='#d9534f', linewidth=2, linestyle='-')
-                    if 100 in x_percent:
-                        nominal_idx = x_percent.index(100)
-                        ax_sens.plot(100, y_volumes[nominal_idx], marker='o', color='black', markersize=8,
-                                     label='Номинал (100%)')
-                    ax_sens.set_xlabel("Изменение начального тепловыделения РАО 1 класса, %", fontsize=10)
-                    ax_sens.set_ylabel("Готово к захоронению к 2050 году, м³", fontsize=10)
-                    ax_sens.grid(True, linestyle='--', alpha=0.6)
-                    ax_sens.xaxis.set_major_locator(MultipleLocator(10))
-                    ax_sens.legend(fontsize=9)
-                    st.pyplot(fig_sens, clear_figure=True)
-                    plt.close()
-                    st.success("Моделирование чувствительности успешно завершено!")
+            if st.button("Запустить симуляцию анализа чувствительности", type="secondary"):
+                if plant is not None and plant.t7 is not None:
+                    with st.spinner("Выполнение итерационного пересчета моделей в логическом ядре..."):
+                        x_percent, y_volumes = plant.t7[technology].RunSensitivityAnalysis(
+                            base_t4=plant.t4, tables_t5_dict=plant.t5_series[technology],
+                            table_t2=plant.t2, table_t3=plant.t3, technology=technology,
+                            start_year=start_yr, end_year=end_yr, min_pct=min_p, max_pct=max_p
+                        )
 
-# --- ПРАВАЯ КОЛОНКА ---
-with col_right:
-    st.markdown("### Параметры конфигурации")
-    if st.button("Зафиксировать конфигурацию", use_container_width=True):
-        st.session_state.report_status = "Текущий сценарий сохранен в базу"
+                        if x_percent and y_volumes:
+                            fig_sens, ax_sens = plt.subplots(figsize=(9, 4.2))
+                            ax_sens.plot(x_percent, y_volumes, marker='s', color='#d9534f', linewidth=2, linestyle='-')
+                            if 100 in x_percent:
+                                nominal_idx = x_percent.index(100)
+                                ax_sens.plot(100, y_volumes[nominal_idx], marker='o', color='black', markersize=8,
+                                             label='Номинал (100%)')
+                            ax_sens.set_xlabel("Изменение начального тепловыделения РАО 1 класса, %", fontsize=10)
+                            ax_sens.set_ylabel(f"Готово к захоронению к {end_yr} году, м³", fontsize=10)
+                            ax_sens.grid(True, linestyle='--', alpha=0.6)
+                            ax_sens.xaxis.set_major_locator(MultipleLocator(10))
+                            ax_sens.legend(fontsize=9)
+                            st.pyplot(fig_sens, clear_figure=True)
+                            plt.close()
+                            st.success("Моделирование чувствительности успешно завершено!")
+                else:
+                    st.error("Нет данных для проведения анализа. Проверьте загрузку таблиц завода.")
+    with col_right:
+        st.markdown("### Параметры конфигурации")
 
-    st.markdown("<br><br><br><br><br>", unsafe_allow_html=True)
-    st.markdown("### Экспорт результатов")
-    with st.container(border=True):
-        if st.button("Сохранить отчет (.docx)", use_container_width=True, type="primary"):
-            with st.spinner("Сборка отчета..."):
-                p_min = st.session_state.get('current_min_pct', 50)
-                p_max = st.session_state.get('current_max_pct', 150)
-                sens_x, sens_y = tables['t7'].RunSensitivityAnalysis(
-                    base_t4=tables['t4'], tables_t5_dict=tables[f't5-{technology}'],
-                    table_t2=tables['t2'], table_t3=tables['t3'], technology=technology,
-                    start_year=start_yr, end_year=end_yr, min_pct=p_min, max_pct=p_max
-                )
-                from main import CreateWordReport
+        if st.button("Зафиксировать конфигурацию", use_container_width=True):
+            st.session_state.report_status = "Текущий сценарий сохранен в базу"
 
-                CreateWordReport(sensitivity_data=(sens_x, sens_y), tech_num=technology)
-                st.session_state.report_status = "Отчет сохранен в папку 'отчёты'!"
+        st.markdown("<br><br><br><br><br><br><br>", unsafe_allow_html=True)
+        st.markdown("### Экспорт результатов")
+        with st.container(border=True):
+            if st.button("Сохранить отчет (.docx)", use_container_width=True, type="primary",
+                         key=f"doc_btn_{active_id}"):
+                if plant is not None:
+                    with st.spinner("Сборка отчета и принудительный расчет обеих технологий в ядре..."):
+                        p_min = st.session_state.get('current_min_pct', 50)
+                        p_max = st.session_state.get('current_max_pct', 150)
 
-        if st.button("Экспортировать таблицу (.xlsx)", use_container_width=True):
-            st.session_state.report_status = "Таблица экспортирована в Excel"
+                        # ИСПРАВЛЕНИЕ: Перед вызовом отчета принудительно рассчитываем ОБЕ технологии для текущей папки!
+                        # Это заставит logic.py заполнить и plant.t5_series, и plant.t5_series
+                        plant.calculate_matrices(technology=1, start_year=start_yr, end_year=end_yr)
+                        plant.calculate_matrices(technology=2, start_year=start_yr, end_year=end_yr)
 
-        if st.session_state.report_status:
-            st.divider()
-            st.caption(st.session_state.report_status)
+                        # Проводим анализ чувствительности для текущей активной на экране технологии
+                        sens_x, sens_y = plant.t7[technology].RunSensitivityAnalysis(
+                            base_t4=plant.t4,
+                            tables_t5_dict=plant.t5_series[technology],
+                            table_t2=plant.t2,
+                            table_t3=plant.t3,
+                            technology=technology,
+                            start_year=start_yr,
+                            end_year=end_yr,
+                            min_pct=p_min,
+                            max_pct=p_max
+                        )
+
+
+                        # Передаем рассчитанный завод в отчет
+                        CreateWordReport(plant=plant, sensitivity_data=(sens_x, sens_y), tech_num=technology)
+                        plant.calculate_matrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                        st.session_state.report_status = f"Отчет для {current_config['name']} успешно сохранен!"
+                        st.rerun()
+                else:
+                    st.error("Нет расчетных данных.")
+
+            if st.button("Экспортировать таблицу (.xlsx)", use_container_width=True):
+                st.session_state.report_status = "Таблица экспортирована в Excel"
+
+            if st.session_state.report_status:
+                st.divider()
+                st.caption(st.session_state.report_status)

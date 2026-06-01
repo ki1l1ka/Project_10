@@ -74,7 +74,7 @@ class Table:
             try:
                 sum += float(self.matrix[row_idx][col].value)
             except (ValueError, TypeError):
-                continue # Пропускаем, если это текст
+                continue
         return sum
     def SumAll(self):
         sum = 0.0
@@ -83,7 +83,7 @@ class Table:
                 try:
                     sum += float(self.matrix[row][elem].value)
                 except (ValueError, TypeError):
-                    continue # Пропускаем, если это текст
+                    continue
         return sum
     def AddRow(self):
         self.matrix.append([Cell() for i in range(len(self.matrix[0]))])
@@ -165,7 +165,6 @@ class CreatedTable(Table):
             table7.AddRow()
             table7.matrix[-1][0].value = i
 
-            # Для каждого класса считаем сумму
             for idx, fuel_class in enumerate(FuelClasses):
                 total_all = 0
                 total_ready = 0
@@ -216,7 +215,6 @@ class CreatedTable(Table):
             temp_t7.T7Create(temp_t4, temp_t5_series, temp_t7, technology=technology, startyear=start_year,
                              endyear=end_year)
 
-            # строка для конечного года расчета (2050)
             row_end_year_idx = temp_t7.FindValue(end_year)['row']
             if row_end_year_idx == 0:
                 # Предохранитель
@@ -233,7 +231,6 @@ class Graph:
     def __init__(self, table=None, column=False, row=False):
         self.graph = dict()
         if table:
-            # Строки от колонок и наоборот
             if column:
                 for i in range(1, len(table.matrix)):
                     self.graph[table.matrix[i][0].value] = table.matrix[i][column].value
@@ -245,9 +242,7 @@ class Graph:
     def FromTableSeries(cls, table_dict, fuel_type, column_name):
         instance = cls()
         for year, table in table_dict.items():
-            # строка с реактором
             res = table.FindValue(fuel_type)
-            # колонка с классом
             col_res = table.FindValue(column_name)
 
             if res and col_res:
@@ -255,9 +250,174 @@ class Graph:
                 try:
                     instance.graph[year] = float(val)
                 except (ValueError, TypeError):
-                    continue  # Если попал заголовок, просто пропускаем
+                    continue  # Если попал заголовок - пропускаем
         return instance
 
+
+import copy
+
+
+class ProcessingPlant:
+
+    def __init__(self, name="Завод №1", folder_path="excel"):
+        self.name = name
+        self.folder_path = folder_path
+
+        # Исходные таблицы
+        self.t1 = None
+        self.t2 = None
+        self.t3 = None
+        self.t4 = None
+
+        self.t5_series = {1: {}, 2: {}}
+        self.t6_series = {1: {}, 2: {}}
+        self.t7 = {1: None, 2: None}
+
+        self.load_plant_data()
+
+    def calculate_matrices(self, technology, start_year, end_year):
+        """Метод производит расчет всех внутренних матриц завода для указанного сценария"""
+        from logic import CreatedTable, TableCreate
+
+        self.t5_series[technology] = {}
+        self.t6_series[technology] = {}
+
+        all_reactors = ["ВВЭР-1000", "ВВЭР-440", "БН-600", "БН-800", "РБМК"]
+        headers = {
+            "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            "t7": ["Год", "1 класс", "Готово к захоронению", "2 класс", "Готово к захоронению", "3 класс",
+                   "Готово к захоронению"],
+        }
+        lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
+
+
+        for y in range(start_year, end_year + 1):
+            self.t5_series[technology][y] = CreatedTable(TableCreate(headers["t5"], lines["t5"]))
+            self.t5_series[technology][y].T5Create(
+                t2=self.t2, t3=self.t3, t5=self.t5_series[technology][y], year=y, technology=technology
+            )
+
+            self.t6_series[technology][y] = CreatedTable(TableCreate(headers["t6"], lines["t6"]))
+            self.t6_series[technology][y].T6Create(
+                table6=self.t6_series[technology][y], tables5=self.t5_series[technology], table4=self.t4, year=y,
+                technology=technology
+            )
+
+        # Расчет итоговой Т7
+        self.t7[technology] = CreatedTable(
+            TableCreate(headers["t7"]),
+            description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
+        )
+        self.t7[technology].T7Create(
+            self.t4, self.t5_series[technology], self.t7[technology], technology=technology, startyear=start_year,
+            endyear=end_year
+        )
+
+    def load_plant_data(self):
+        import os
+        import pandas as pd
+        from logic import Table
+
+        # Проверяем существование папки
+        if not os.path.exists(self.folder_path):
+            raise FileNotFoundError(f"Папка данных '{self.folder_path}' для завода {self.name} не найдена!")
+        # Проверяем наличие всех файлов
+        for t_name in ['t1', 't2', 't3', 't4']:
+            file_p = os.path.join(self.folder_path, f"{t_name}.xlsx")
+            if not os.path.exists(file_p):
+                raise FileNotFoundError(f"В папке {self.folder_path} отсутствует обязательный файл {t_name}.xlsx")
+        try:
+            self.t1 = Table(pd.read_excel(os.path.join(self.folder_path, "t1.xlsx"), header=None).to_numpy(),
+                            description=f"Таблица Т1. Исходные данные по образованию ОЯТ — {self.name}")
+
+            self.t2 = Table(pd.read_excel(os.path.join(self.folder_path, "t2.xlsx"), header=None).to_numpy(),
+                            description=f"Таблица Т2. Данные по загрузке завода ОЯТ — {self.name}")
+
+            self.t3 = Table(pd.read_excel(os.path.join(self.folder_path, "t3.xlsx"), header=None).to_numpy(),
+                            description=f"Таблица Т3. Образование РАО различных классов — {self.name}")
+
+            self.t4 = Table(pd.read_excel(os.path.join(self.folder_path, "t4.xlsx"), header=None).to_numpy(),
+                            description=f"Таблица Т4. Тепловыделение РАО сразу после переработки — {self.name}")
+
+            print(f"✔️ Все таблицы для '{self.name}' успешно загружены из папки '{self.folder_path}'")
+        except Exception as e:
+            raise IOError(f"Критическая ошибка при парсинге Excel-таблиц для {self.name}: {e}")
+
+    def calculate_matrices(self, technology, start_year, end_year):
+        """Метод производит расчет всех внутренних матриц завода для указанного сценария"""
+        from logic import CreatedTable, TableCreate
+
+        if not hasattr(self, 't5_series') or not isinstance(self.t5_series, dict):
+            self.t5_series = {1: {}, 2: {}}
+        if not hasattr(self, 't6_series') or not isinstance(self.t6_series, dict):
+            self.t6_series = {1: {}, 2: {}}
+        if not hasattr(self, 't7') or not isinstance(self.t7, dict):
+            self.t7 = {1: None, 2: None}
+
+        self.t5_series[technology] = {}
+        self.t6_series[technology] = {}
+        self.t7[technology] = None
+
+        all_reactors = ["ВВЭР-1000", "ВВЭР-440", "БН-600", "БН-800", "РБМК"]
+        headers = {
+            "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            "t7": ["Год", "1 класс", "Готово к захоронению", "2 класс", "Готово к захоронению", "3 класс", "Готово к захоронению"],
+        }
+        lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
+
+        # Расчет серий Т5 и Т6 по годам для выбранной технологии
+        for y in range(start_year, end_year + 1):
+            self.t5_series[technology][y] = CreatedTable(TableCreate(headers["t5"], lines["t5"]))
+            self.t5_series[technology][y].T5Create(
+                t2=self.t2, t3=self.t3, t5=self.t5_series[technology][y], year=y, technology=technology
+            )
+
+            self.t6_series[technology][y] = CreatedTable(TableCreate(headers["t6"], lines["t6"]))
+            self.t6_series[technology][y].T6Create(
+                table6=self.t6_series[technology][y], tables5=self.t5_series[technology], table4=self.t4, year=y, technology=technology
+            )
+
+        # Расчет итоговой Т7 для выбранной технологии
+        self.t7[technology] = CreatedTable(
+            TableCreate(headers["t7"]),
+            description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
+        )
+        self.t7[technology].T7Create(
+            self.t4, self.t5_series[technology], self.t7[technology], technology=technology, startyear=start_year, endyear=end_year
+        )
+
+
+
+class BurialSite:
+    def __init__(self, ClassA="1 класс", ClassACapacity=0, ClassB="2 класс", ClassBCapacity=0, CClassAMaxTempo=1000, lassBMaxTempo=1500):
+        self.Capacities = {str(ClassA): float(ClassACapacity), str(ClassB): float(ClassBCapacity)}
+        self.FullCapacity = ClassACapacity + ClassBCapacity # Предполагается захоронение только двух классов на объект
+        self.Full = False
+        if abs(int(ClassA.strip()[0]) - int(ClassB.strip()[0])) > 1:
+            print('''Возможная ошибка! Убедитесь в верности заданных классов.
+                    Для глубинного - 1,2 классы.
+                    Для приповерхностного - 3,4 классы.''')
+    def Load(self, wasteClass, wasteAmount):
+        if wasteClass not in self.Capacities.keys():
+            print(f"Ошибка: Класс '{wasteClass}' не поддерживается данным объектом.")
+            return
+        if self.Capacities[wasteClass] >= wasteAmount:
+            self.Capacities[wasteClass] -= wasteAmount
+            self.FullCapacity -= wasteAmount
+            # print("Загрузка прошла успешно")
+        else:
+            if (self.Capacities[wasteClass] - wasteAmount) < 0:
+                self.Capacities[wasteClass] = 0
+                left = abs(self.Capacities[wasteClass] - wasteAmount)
+                print(f"Удалось загрузить {wasteAmount-left}")
+                print(f"Осталось {left}")
+                return left
+            # print("Хранилище полностью заполнено.")
+            self.Full = True
+    def IsFull(self):
+        return self.Full
 
 import matplotlib.pyplot as plt
 import os
@@ -268,11 +428,7 @@ class NuclearDataVisualizer:
         self.datasets = {}
 
     def add_graph(self, label, graph_obj):
-
-        # данные из словаря внутри объекта Graph
         raw_data = graph_obj.graph
-
-        # Сортируем по годам
         sorted_keys = sorted(raw_data.keys(), key=lambda x: float(x))
         x_values = [float(k) for k in sorted_keys]
         y_values = [float(raw_data[k]) for k in sorted_keys]
@@ -310,7 +466,6 @@ class TableVisualizer:
 
     def plot_table(self, exclude_rows=None, exclude_cols=None, title=None, save_path=None):
 
-        # Превращаем матрицу объектов Cell в список списков
         raw_data = [[cell.value for cell in row] for row in self.table.matrix]
 
         # Фильтрация
@@ -327,12 +482,8 @@ class TableVisualizer:
         if not raw_data:
             print("Ошибка: После фильтрации таблица пуста!")
             return
-
-        # Настройка отображения
         fig, ax = plt.subplots(figsize=(12, len(raw_data) * 0.6))
         ax.axis('off')
-
-        # Создание таблицы matplotlib
         thead = raw_data[0]
         tbody = raw_data[1:]
 
@@ -341,9 +492,9 @@ class TableVisualizer:
 
         table_plot.auto_set_font_size(False)
         table_plot.set_fontsize(10)
-        table_plot.scale(1.2, 1.8)  # Масштаб ячеек по высоте и ширине
+        table_plot.scale(1.2, 1.8)
 
-        # Оформление заголовков
+        # заголовки
         for (row, col), cell in table_plot.get_celld().items():
             if row == 0:
                 cell.set_text_props(weight='bold', color='white')
