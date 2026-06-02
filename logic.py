@@ -252,14 +252,14 @@ class Graph:
                 except (ValueError, TypeError):
                     continue  # Если попал заголовок - пропускаем
         return instance
-
-
 import copy
+import os
+import pandas as pd
 
 
 class ProcessingPlant:
 
-    def __init__(self, name="Завод №1", folder_path="excel"):
+    def __init__(self, name="Завод №1", folder_path="excel/Завод 1"):
         self.name = name
         self.folder_path = folder_path
 
@@ -269,68 +269,39 @@ class ProcessingPlant:
         self.t3 = None
         self.t4 = None
 
+        # Расчетные таблицы (словари по технологиям 1, 2
         self.t5_series = {1: {}, 2: {}}
         self.t6_series = {1: {}, 2: {}}
         self.t7 = {1: None, 2: None}
 
-        self.load_plant_data()
+        self.LoadPlantData()
 
-    def calculate_matrices(self, technology, start_year, end_year):
-        """Метод производит расчет всех внутренних матриц завода для указанного сценария"""
-        from logic import CreatedTable, TableCreate
-
-        self.t5_series[technology] = {}
-        self.t6_series[technology] = {}
-
-        all_reactors = ["ВВЭР-1000", "ВВЭР-440", "БН-600", "БН-800", "РБМК"]
-        headers = {
-            "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
-            "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
-            "t7": ["Год", "1 класс", "Готово к захоронению", "2 класс", "Готово к захоронению", "3 класс",
-                   "Готово к захоронению"],
-        }
-        lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
-
-
-        for y in range(start_year, end_year + 1):
-            self.t5_series[technology][y] = CreatedTable(TableCreate(headers["t5"], lines["t5"]))
-            self.t5_series[technology][y].T5Create(
-                t2=self.t2, t3=self.t3, t5=self.t5_series[technology][y], year=y, technology=technology
-            )
-
-            self.t6_series[technology][y] = CreatedTable(TableCreate(headers["t6"], lines["t6"]))
-            self.t6_series[technology][y].T6Create(
-                table6=self.t6_series[technology][y], tables5=self.t5_series[technology], table4=self.t4, year=y,
-                technology=technology
-            )
-
-        # Расчет итоговой Т7
-        self.t7[technology] = CreatedTable(
-            TableCreate(headers["t7"]),
-            description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
-        )
-        self.t7[technology].T7Create(
-            self.t4, self.t5_series[technology], self.t7[technology], technology=technology, startyear=start_year,
-            endyear=end_year
-        )
-
-    def load_plant_data(self):
+    def LoadPlantData(self):
         import os
         import pandas as pd
         from logic import Table
+        global_excel_root = "excel"
 
-        # Проверяем существование папки
+        # t1 считывается из корня
+        t1_global_path = os.path.join(global_excel_root, "t1.xlsx")
+        if not os.path.exists(t1_global_path):
+            raise FileNotFoundError(f"Критическая ошибка: Общая таблица Т1 не найдена по пути '{t1_global_path}'!")
+
+        self.t1 = Table(pd.read_excel(t1_global_path, header=None).to_numpy(),
+                        description=f"Таблица Т1. Общие исходные данные по образованию ОЯТ (тонны тяжелого металла)")
+
+        # Проверяем наличие файлов (t2, t3, t4) в подпапке конкретного завода
         if not os.path.exists(self.folder_path):
-            raise FileNotFoundError(f"Папка данных '{self.folder_path}' для завода {self.name} не найдена!")
-        # Проверяем наличие всех файлов
-        for t_name in ['t1', 't2', 't3', 't4']:
+            return
+
+        for t_name in ['t2', 't3', 't4']:
             file_p = os.path.join(self.folder_path, f"{t_name}.xlsx")
             if not os.path.exists(file_p):
-                raise FileNotFoundError(f"В папке {self.folder_path} отсутствует обязательный файл {t_name}.xlsx")
-        try:
-            self.t1 = Table(pd.read_excel(os.path.join(self.folder_path, "t1.xlsx"), header=None).to_numpy(),
-                            description=f"Таблица Т1. Исходные данные по образованию ОЯТ — {self.name}")
+                raise FileNotFoundError(
+                    f"В папке завода {self.folder_path} отсутствует обязательный файл {t_name}.xlsx")
 
+        try:
+            # Считываем таблицы завода (t2, t3, t4) из его собственной папки
             self.t2 = Table(pd.read_excel(os.path.join(self.folder_path, "t2.xlsx"), header=None).to_numpy(),
                             description=f"Таблица Т2. Данные по загрузке завода ОЯТ — {self.name}")
 
@@ -340,21 +311,11 @@ class ProcessingPlant:
             self.t4 = Table(pd.read_excel(os.path.join(self.folder_path, "t4.xlsx"), header=None).to_numpy(),
                             description=f"Таблица Т4. Тепловыделение РАО сразу после переработки — {self.name}")
 
-            print(f"✔️ Все таблицы для '{self.name}' успешно загружены из папки '{self.folder_path}'")
+            print(f"✔️ Данные для '{self.name}' успешно инициализированы (Т1 взята из общего корня)")
         except Exception as e:
             raise IOError(f"Критическая ошибка при парсинге Excel-таблиц для {self.name}: {e}")
 
-    def calculate_matrices(self, technology, start_year, end_year):
-        """Метод производит расчет всех внутренних матриц завода для указанного сценария"""
-        from logic import CreatedTable, TableCreate
-
-        if not hasattr(self, 't5_series') or not isinstance(self.t5_series, dict):
-            self.t5_series = {1: {}, 2: {}}
-        if not hasattr(self, 't6_series') or not isinstance(self.t6_series, dict):
-            self.t6_series = {1: {}, 2: {}}
-        if not hasattr(self, 't7') or not isinstance(self.t7, dict):
-            self.t7 = {1: None, 2: None}
-
+    def CalculateMatrices(self, technology, start_year, end_year):
         self.t5_series[technology] = {}
         self.t6_series[technology] = {}
         self.t7[technology] = None
@@ -363,30 +324,124 @@ class ProcessingPlant:
         headers = {
             "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
             "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
-            "t7": ["Год", "1 класс", "Готово к захоронению", "2 класс", "Готово к захоронению", "3 класс", "Готово к захоронению"],
+            "t7": [
+                "Год",
+                "1 класс",
+                "Готово к захоронению",
+                "2 класс",
+                "Готово к захоронению",
+                "3 класс",
+                "Готово к захоронению",
+            ],
         }
         lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
 
-        # Расчет серий Т5 и Т6 по годам для выбранной технологии
+        # Считаем Т5 и Т6 по годам
         for y in range(start_year, end_year + 1):
-            self.t5_series[technology][y] = CreatedTable(TableCreate(headers["t5"], lines["t5"]))
+            self.t5_series[technology][y] = CreatedTable(
+                TableCreate(headers["t5"], lines["t5"])
+            )
             self.t5_series[technology][y].T5Create(
-                t2=self.t2, t3=self.t3, t5=self.t5_series[technology][y], year=y, technology=technology
+                t2=self.t2,
+                t3=self.t3,
+                t5=self.t5_series[technology][y],
+                year=y,
+                technology=technology,
             )
 
-            self.t6_series[technology][y] = CreatedTable(TableCreate(headers["t6"], lines["t6"]))
+            self.t6_series[technology][y] = CreatedTable(
+                TableCreate(headers["t6"], lines["t6"])
+            )
             self.t6_series[technology][y].T6Create(
-                table6=self.t6_series[technology][y], tables5=self.t5_series[technology], table4=self.t4, year=y, technology=technology
+                table6=self.t6_series[technology][y],
+                tables5=self.t5_series[technology],
+                table4=self.t4,
+                year=y,
+                technology=technology,
             )
 
-        # Расчет итоговой Т7 для выбранной технологии
+        # Считаем итоговую Т7
         self.t7[technology] = CreatedTable(
             TableCreate(headers["t7"]),
-            description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
+            description=f"Количество РАО накопительным итогом — {self.name}",
         )
         self.t7[technology].T7Create(
-            self.t4, self.t5_series[technology], self.t7[technology], technology=technology, startyear=start_year, endyear=end_year
+            self.t4,
+            self.t5_series[technology],
+            self.t7[technology],
+            technology=technology,
+            startyear=start_year,
+            endyear=end_year,
         )
+
+    def RunSensitivityAnalysis(
+        self, technology, start_year, end_year, min_pct, max_pct
+    ):
+        """Итерационный пересчет чувствительности внутри завода"""
+        coefficients = [x / 100.0 for x in range(min_pct, max_pct + 1, 5)]
+        ready_volumes = []
+
+        all_reactors = ["ВВЭР-1000", "ВВЭР-440", "БН-600", "БН-800", "РБМК"]
+        headers = {
+            "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            "t7": [
+                "Год",
+                "1 класс",
+                "Готово к захоронению",
+                "2 класс",
+                "Готово к захоронению",
+                "3 класс",
+                "Готово к захоронению",
+            ],
+        }
+        lines = {"t5": ["Завод"] + all_reactors}
+
+        start_col_shift = 5 * (technology - 1)
+
+        for coeff in coefficients:
+            temp_t4 = copy.deepcopy(self.t4)
+
+            for reactor in all_reactors:
+                row_idx = temp_t4.FindValue(reactor)["row"]
+                col_idx = temp_t4.FindValue("1 класс", start=start_col_shift)[
+                    "column"
+                ]
+                original_value = float(temp_t4.matrix[row_idx][col_idx].value)
+                temp_t4.matrix[row_idx][col_idx].value = original_value * coeff
+
+            temp_t5_series = {}
+            for year in range(start_year, end_year + 1):
+                temp_t5_series[year] = CreatedTable(
+                    TableCreate(headers["t5"], lines["t5"])
+                )
+                temp_t5_series[year].T5Create(
+                    t2=self.t2,
+                    t3=self.t3,
+                    t5=temp_t5_series[year],
+                    year=year,
+                    technology=technology,
+                )
+
+            temp_t7 = CreatedTable(TableCreate(headers["t7"]))
+            temp_t7.T7Create(
+                temp_t4,
+                temp_t5_series,
+                temp_t7,
+                technology=technology,
+                startyear=start_year,
+                endyear=end_year,
+            )
+
+            row_end_idx = temp_t7.FindValue(end_year)["row"]
+            if row_end_idx == 0:
+                row_end_idx = len(temp_t7.matrix) - 1
+            vol_ready = float(temp_t7.matrix[row_end_idx][2].value)
+
+            ready_volumes.append(round(vol_ready, 1))
+
+        percentages = [int(c * 100) for c in coefficients]
+        return percentages, ready_volumes
+
 
 
 
@@ -455,6 +510,39 @@ class NuclearDataVisualizer:
         plt.savefig(buf, format='png', bbox_inches='tight')
         doc.add_picture(buf, width=Inches(5.5))
         plt.close()
+
+    def GetT7PlotData(self, active_t7_obj):
+        # Структура для возврата чистых числовых массивов
+        plot_data = {
+            "1 класс (Всего)": [], "1 класс (Готово)": [],
+            "2 класс (Всего)": [], "2 класс (Готово)": [],
+            "3 класс (Всего)": [], "3 класс (Готово)": []
+        }
+
+        if active_t7_obj is None or not hasattr(active_t7_obj, 'matrix'):
+            return plot_data
+
+        # Мапинг конфигурации колонок таблицы Т7
+        config = [
+            (1, 2, "1 класс"),
+            (3, 4, "2 класс"),
+            (5, 6, "3 класс")
+        ]
+
+        for col_all, col_ready, class_key in config:
+            for r in range(1, len(active_t7_obj.matrix)):
+                # Всего
+                val_all = active_t7_obj.matrix[r][col_all].value
+                num_all = float(val_all) if val_all is not None and str(val_all).strip() != "" else 0.0
+                plot_data[f"{class_key} (Всего)"].append(num_all)
+
+                # Готово
+                val_ready = active_t7_obj.matrix[r][col_ready].value
+                num_ready = float(val_ready) if val_ready is not None and str(val_ready).strip() != "" else 0.0
+                plot_data[f"{class_key} (Готово)"].append(num_ready)
+
+        return plot_data
+
     def clear(self):
         self.datasets = {}
 
@@ -505,3 +593,128 @@ class TableVisualizer:
         if save_path:
             plt.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.show()
+def ExportTableToExcel(table_obj, label_name="таблица"):
+    import os
+    import pandas as pd
+
+    if table_obj is None or not hasattr(table_obj, 'matrix'):
+        return False
+
+    folder = "отчёты"
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    clean_label = label_name.replace(" ", "_").replace("(", "").replace(")", "")
+    n = 1
+    while os.path.exists(f"{folder}/экспорт_{clean_label}_{n}.xlsx"):
+        n += 1
+    filename = f"{folder}/экспорт_{clean_label}_{n}.xlsx"
+
+    raw_matrix = [[cell.value for cell in row] for row in table_obj.matrix]
+    if len(raw_matrix) == 0:
+        return False
+
+    headers = []
+    for cell_val in raw_matrix[0]:
+        val_str = str(cell_val).strip() if pd.notna(cell_val) else ""
+        if val_str.lower() == "nan" or val_str == "None":
+            val_str = ""
+        headers.append(val_str)
+
+    max_cols = max(len(row) for row in raw_matrix)
+    if len(headers) < max_cols:
+        headers.extend([""] * (max_cols - len(headers)))
+    else:
+        headers = headers[:max_cols]
+
+    seen = {}
+    for idx, h in enumerate(headers):
+        if h in seen:
+            seen[h] += 1
+            headers[idx] = h + (" " * seen[h])
+        else:
+            seen[h] = 0
+
+    body_data = []
+    for row in raw_matrix[1:]:
+        new_row = []
+        for cell_val in row:
+            if pd.isna(cell_val) or str(cell_val).lower() == "nan" or str(cell_val) == "None":
+                new_row.append("")
+            else:
+                new_row.append(cell_val)
+        if len(new_row) < max_cols:
+            new_row.extend([""] * (max_cols - len(new_row)))
+        else:
+            new_row = new_row[:max_cols]
+        body_data.append(new_row)
+
+    try:
+        df_export = pd.DataFrame(body_data, columns=headers)
+        df_export.to_excel(filename, index=False)
+        return filename
+    except Exception as e:
+        print(f"Ошибка сохранения Excel: {e}")
+        return False
+
+
+class ReportConstructor:
+    def __init__(self):
+        self.SelectedElements = []
+
+    def GetAvailableElements(self, plants_session_dict, start_yr, end_yr):
+        registry = []
+        first_plant_id = list(plants_session_dict.keys())[0] if plants_session_dict else None
+
+        # Добавляем Т1 как глобальный элемент
+        registry.append({
+            "key": "global_t1",
+            "type": "table",
+            "group": "Глобальные данные",
+            "label": "Таблица Т1. Исходные данные по образованию ОЯТ по годам",
+            "plant_name": None,
+            "field_name": "t1",
+            "year": None
+        })
+        for p_id, p_info in plants_session_dict.items():
+            p_name = p_info["name"]
+            group_label = f"Завод: {p_name}"
+            registry.append({"key": f"t2_{p_id}", "type": "table", "group": group_label,
+                             "label": "Таблица Т2. Данные по загрузке завода ОЯТ", "plant_name": p_name,
+                             "field_name": "t2", "year": None})
+            registry.append({"key": f"t3_{p_id}", "type": "table", "group": group_label,
+                             "label": "Таблица Т3. Нормативы образования РАО", "plant_name": p_name, "field_name": "t3",
+                             "year": None})
+            registry.append({"key": f"t4_{p_id}", "type": "table", "group": group_label,
+                             "label": "Таблица Т4. Удельное тепловыделение РАО", "plant_name": p_name,
+                             "field_name": "t4", "year": None})
+
+            # Расчетные Т5 и Т6 по годам для обеих технологий
+            for tech in [1, 2]:
+                for yr in range(start_yr, end_yr + 1):
+                    registry.append({
+                        "key": f"t5_{p_id}_{tech}_{yr}", "type": "table", "group": group_label,
+                        "label": f"Таблица Т5. Объемы РАО (Технология {tech}, Год {yr})",
+                        "plant_name": p_name, "field_name": "t5_series", "tech": tech, "year": yr
+                    })
+                    registry.append({
+                        "key": f"t6_{p_id}_{tech}_{yr}", "type": "table", "group": group_label,
+                        "label": f"Таблица Т6. Среднее тепловыделение РАО (Технология {tech}, Год {yr})",
+                        "plant_name": p_name, "field_name": "t6_series", "tech": tech, "year": yr
+                    })
+
+                # Итоговая накопительная Т7
+                registry.append({
+                    "key": f"t7_{p_id}_{tech}", "type": "table", "group": group_label,
+                    "label": f"Таблица Т7. Итоговая накопительная ведомость РАО (Технология {tech})",
+                    "plant_name": p_name, "field_name": "t7", "tech": tech, "year": None
+                })
+
+            # Графики по текущему заводу
+            registry.append({"key": f"g_t7_{p_id}", "type": "graph", "group": group_label,
+                             "label": "График Т7. Накопление и готовность РАО 1 класса", "plant_name": p_name,
+                             "field_name": "graph_t7"})
+            registry.append({"key": f"g_sens_{p_id}", "type": "graph", "group": group_label,
+                             "label": "График чувствительности. Зависимость объемов от тепловыделения",
+                             "plant_name": p_name, "field_name": "graph_sens"})
+
+        return registry
