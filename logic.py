@@ -2,9 +2,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from PIL.ImtImagePlugin import field
 from matplotlib import lines
+import copy
+import os
+import pandas as pd
 from Physics import *
-import json
-FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2}
+import streamlit as st
+FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2, "4 класс": 0.3}
 # Создание таблицы
 def TableExcel(FileName):
     df = pd.read_excel(f"excel/{FileName}.xlsx", header=None)
@@ -113,6 +116,73 @@ class Table:
         print(f"Ошибка: Значение '{Value}' не найдено в таблице!")
         return {'row': 0, 'column': 0}
 
+    def UpdateFromDataFrame(self, old_df, new_df):
+        if old_df is None or new_df is None:
+            return False
+        # Обходим строки и колонки
+        for r in range(len(new_df)):
+            for c in range(len(new_df.columns)):
+                old_val = old_df.iloc[r, c]
+                new_val = new_df.iloc[r, c]
+                if old_val != new_val:
+                    # Приведение типов данных
+                    if pd.isna(new_val) or str(new_val).strip() == "":
+                        typed_val = None
+                    else:
+                        try:
+                            typed_val = float(new_val) if '.' in str(new_val) else int(new_val)
+                        except ValueError:
+                            typed_val = new_val
+                    if (r + 1) < len(self.matrix) and c < len(self.matrix[r + 1]):
+                        self.matrix[r + 1][c].value = typed_val
+        return True
+
+    def ToDataFrame(self):
+        raw_matrix = [[cell.value for cell in row] for row in self.matrix]
+        if len(raw_matrix) == 0:
+            return pd.DataFrame()
+
+        max_cols = max(len(row) for row in raw_matrix)
+        headers = []
+        for cell_val in raw_matrix[0]:
+            if cell_val is None:
+                val_str = ""
+            elif isinstance(cell_val, (list, tuple)):
+                val_str = " ".join([str(v).strip() for v in cell_val if v is not None])
+            else:
+                val_str = str(cell_val).strip()
+            if val_str.lower() in ["nan", "none"]: val_str = ""
+            headers.append(val_str)
+
+        if len(headers) < max_cols:
+            headers.extend([""] * (max_cols - len(headers)))
+        else:
+            headers = headers[:max_cols]
+
+        # уникальность имен
+        seen = {}
+        for idx, h in enumerate(headers):
+            if h in seen:
+                seen[h] += 1
+                headers[idx] = h + (" " * seen[h])
+            else:
+                seen[h] = 0
+        body_data = []
+        for row in raw_matrix[1:]:
+            if len(row) == 0: continue
+            new_row = []
+            for cell_val in row:
+                if cell_val is None or str(cell_val).lower() in ["nan", "none"]:
+                    new_row.append("")
+                else:
+                    new_row.append(round(cell_val, 2) if isinstance(cell_val, (int, float)) else cell_val)
+            if len(new_row) < max_cols:
+                new_row.extend([""] * (max_cols - len(new_row)))
+            else:
+                new_row = new_row[:max_cols]
+            body_data.append(new_row)
+        return pd.DataFrame(body_data, columns=headers)
+
     def Clear(self):
         self.matrix = [[Cell() for i in range(len(self.matrix[0]))] for j in range(len(self.matrix))]
 
@@ -159,7 +229,8 @@ class CreatedTable(Table):
         ColClass1 = 1
         ColClass2 = 3
         ColClass3 = 5
-        FuelClasses = ["1 класс", "2 класс", "3 класс"]
+        ColClass4 = 7
+        FuelClasses = ["1 класс", "2 класс", "3 класс", "4 класс"]
         table7.DeleteRow()
         for i in range(startyear, endyear + 1):
             table7.AddRow()
@@ -190,7 +261,7 @@ class CreatedTable(Table):
         headers = {
             't5': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
             't7': ["Год", '1 класс', "Готово к захоронению", '2 класс', "Готово к захоронению", '3 класс',
-                   "Готово к захоронению"]
+                   "Готово к захоронению", '4 класс', "Готово к захоронению"]
         }
         lines = {'t5': ['Завод'] + all_reactors}
 
@@ -252,10 +323,6 @@ class Graph:
                 except (ValueError, TypeError):
                     continue  # Если попал заголовок - пропускаем
         return instance
-import copy
-import os
-import pandas as pd
-
 
 class ProcessingPlant:
 
@@ -324,16 +391,16 @@ class ProcessingPlant:
         headers = {
             "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
             "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
+            # ИСПРАВЛЕНИЕ: Шапка Т7 расширена до 9 колонок
             "t7": [
                 "Год",
-                "1 класс",
-                "Готово к захоронению",
-                "2 класс",
-                "Готово к захоронению",
-                "3 класс",
-                "Готово к захоронению",
+                "1 класс", "Готово к захоронению",
+                "2 класс", "Готово к захоронению",
+                "3 класс", "Готово к захоронению",
+                "4 класс", "Готово к захоронению"
             ],
         }
+
         lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
 
         # Считаем Т5 и Т6 по годам
@@ -512,23 +579,21 @@ class NuclearDataVisualizer:
         plt.close()
 
     def GetT7PlotData(self, active_t7_obj):
-        # Структура для возврата чистых числовых массивов
         plot_data = {
             "1 класс (Всего)": [], "1 класс (Готово)": [],
             "2 класс (Всего)": [], "2 класс (Готово)": [],
-            "3 класс (Всего)": [], "3 класс (Готово)": []
-        }
+            "3 класс (Всего)": [], "3 класс (Готово)": [],
+            "4 класс (Всего)": [], "4 класс (Готово)": []
+        }# В последних расчетах учитывается и 4-й класс
 
         if active_t7_obj is None or not hasattr(active_t7_obj, 'matrix'):
             return plot_data
-
-        # Мапинг конфигурации колонок таблицы Т7
         config = [
             (1, 2, "1 класс"),
             (3, 4, "2 класс"),
-            (5, 6, "3 класс")
+            (5, 6, "3 класс"),
+            (7, 8, "4 класс")
         ]
-
         for col_all, col_ready, class_key in config:
             for r in range(1, len(active_t7_obj.matrix)):
                 # Всего
@@ -665,7 +730,7 @@ class ReportConstructor:
         registry = []
         first_plant_id = list(plants_session_dict.keys())[0] if plants_session_dict else None
 
-        # Добавляем Т1 как глобальный элемент
+        # Т1 как глобальный элемент
         registry.append({
             "key": "global_t1",
             "type": "table",
@@ -688,7 +753,7 @@ class ReportConstructor:
                              "label": "Таблица Т4. Удельное тепловыделение РАО", "plant_name": p_name,
                              "field_name": "t4", "year": None})
 
-            # Расчетные Т5 и Т6 по годам для обеих технологий
+            # Расчетные Т5 и Т6
             for tech in [1, 2]:
                 for yr in range(start_yr, end_yr + 1):
                     registry.append({
@@ -718,3 +783,124 @@ class ReportConstructor:
                              "plant_name": p_name, "field_name": "graph_sens"})
 
         return registry
+
+
+def SimulateAllBurials(plants_session_dict, start_yr, end_yr):
+    BurialSiteDeep = BurialSite("1 класс", 40000, "2 класс", 60000)
+    BurialSiteSurface = BurialSite("3 класс", 40000, "4 класс", 100000)
+    deficit_records = []
+    for yr in range(start_yr, end_yr + 1):
+        year_ready_1cl = 0.0
+        year_ready_2cl = 0.0
+        year_ready_3cl = 0.0
+        year_ready_4cl = 0.0
+
+
+        for p_id, p_info in plants_session_dict.items():
+            plant_key = f"plant_object_{p_id}"
+
+            if plant_key in st.session_state and st.session_state[plant_key] is not None:
+                plant_obj = st.session_state[plant_key]
+                tech = p_info["technology"]
+                t7_dict = getattr(plant_obj, "t7", {})
+                t7_obj = t7_dict.get(tech) if isinstance(t7_dict, dict) else t7_field
+
+                if t7_obj is not None and hasattr(t7_obj, 'matrix'):
+                    row_idx = 0
+                    for r in range(1, len(t7_obj.matrix)):
+                        if t7_obj.matrix[r].value == yr:
+                            row_idx = r
+                            break
+
+                    # суммируем кубометры
+                    if t7_obj.matrix[r][0].value == yr:
+                        matrix_row = t7_obj.matrix[row_idx]
+                        year_ready_1cl += float(matrix_row[2].value or 0.0)
+                        year_ready_2cl += float(matrix_row[4].value or 0.0)
+                        year_ready_3cl += float(matrix_row[6].value or 0.0)
+                        if len(matrix_row) > 8: year_ready_4cl += float(matrix_row[8].value or 0.0)
+
+        # Распределяем суммарные объемы РАО отрасли по объектам захоронения
+        left_1 = BurialSiteDeep.Load("1 класс", year_ready_1cl)
+        left_2 = BurialSiteDeep.Load("2 класс", year_ready_2cl)
+        left_3 = BurialSiteSurface.Load("3 класс", year_ready_3cl)
+        left_4 = BurialSiteSurface.Load("4 класс", year_ready_4cl)
+
+        if (left_1 or 0) > 0 or (left_2 or 0) > 0 or (left_3 or 0) > 0 or (left_4 or 0) > 0:
+            deficit_records.append({
+                "Год": yr,
+                "1 класс (деф, м³)": round(left_1 or 0.0, 1),
+                "2 класс (деф, м³)": round(left_2 or 0.0, 1),
+                "3 класс (деф, м³)": round(left_3 or 0.0, 1),
+                "4 класс (деф, м³)": round(left_4 or 0.0, 1)
+            })
+
+    return deficit_records
+
+def GetBurialAccumulationData(plants_session_dict, start_yr, end_yr):
+    # Инициализируем чистые хранилища
+    BurialSiteDeep = BurialSite("1 класс", 40000, "2 класс", 60000)
+    BurialSiteSurface = BurialSite("3 класс", 40000, "4 класс", 100000)
+    accumulation_data = {
+        "years": [],
+        "1 класс (ПГЗР)": [], "2 класс (ПГЗР)": [],
+        "3 класс (ППЗР)": [], "4 класс (ППЗР)": []
+    }
+
+    # Счетчики объемов в захоронениях
+    filled_1cl = 0.0
+    filled_2cl = 0.0
+    filled_3cl = 0.0
+    filled_4cl = 0.0
+
+    for yr in range(start_yr, end_yr + 1):
+        year_ready_1cl = 0.0
+        year_ready_2cl = 0.0
+        year_ready_3cl = 0.0
+        year_ready_4cl = 0.0
+
+        # Собираем готовые объемы РАО
+        for p_id, p_info in plants_session_dict.items():
+            import streamlit as st
+            plant_key = f"plant_object_{p_id}"
+
+            if plant_key in st.session_state and st.session_state[plant_key] is not None:
+                plant_obj = st.session_state[plant_key]
+                tech = p_info["technology"]
+                t7_dict = getattr(plant_obj, "t7", {})
+                t7_obj = t7_dict.get(tech) if isinstance(t7_dict, dict) else None
+
+                if t7_obj is not None and hasattr(t7_obj, 'matrix'):
+                    row_idx = 0
+                    for r in range(1, len(t7_obj.matrix)):
+                        if t7_obj.matrix[r][0].value == yr:
+                            row_idx = r
+                            break
+
+                    if row_idx > 0:
+                        matrix_row = t7_obj.matrix[row_idx]
+                        year_ready_1cl += float(matrix_row[2].value or 0.0)
+                        year_ready_2cl += float(matrix_row[4].value or 0.0)
+                        year_ready_3cl += float(matrix_row[6].value or 0.0)
+                        if len(matrix_row) > 8:
+                            year_ready_4cl += float(matrix_row[8].value or 0.0)
+
+        # Загрузка
+        left_1 = BurialSiteDeep.Load("1 класс", year_ready_1cl)
+        left_2 = BurialSiteDeep.Load("2 класс", year_ready_2cl)
+        left_3 = BurialSiteSurface.Load("3 класс", year_ready_3cl)
+        left_4 = BurialSiteSurface.Load("4 класс", year_ready_4cl)
+
+        # Объем который загружен в хранилище
+        filled_1cl += (year_ready_1cl - (left_1 or 0.0))
+        filled_2cl += (year_ready_2cl - (left_2 or 0.0))
+        filled_3cl += (year_ready_3cl - (left_3 or 0.0))
+        filled_4cl += (year_ready_4cl - (left_4 or 0.0))
+
+        accumulation_data["years"].append(yr)
+        accumulation_data["1 класс (ПГЗР)"].append(filled_1cl)
+        accumulation_data["2 класс (ПГЗР)"].append(filled_2cl)
+        accumulation_data["3 класс (ППЗР)"].append(filled_3cl)
+        accumulation_data["4 класс (ППЗР)"].append(filled_4cl)
+
+    return accumulation_data

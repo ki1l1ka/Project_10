@@ -155,6 +155,9 @@ with st.container():
             check_path = os.path.join("excel", input_folder)
             if os.path.exists(check_path):
                 st.session_state.plants_data[active_id]["folder_path"] = input_folder
+                if f"plant_object_{active_id}" in st.session_state:
+                    del st.session_state[f"plant_object_{active_id}"]
+
                 st.toast(f"Для '{current_config['name']}' установлена папка: excel/{input_folder}")
                 st.rerun()
             else:
@@ -172,10 +175,11 @@ with st.container():
 st.divider()
 active_table_obj = None
 selected_year = "all"
-table_field_name = "t1"  # По умолчанию выставляем базовую таблицу Т1
+table_field_name = "t1"
 
 col_left, col_center, col_right = st.columns([2.5, 6.5, 3.0], gap="large")
 
+# Левая колонка
 with col_left:
     st.markdown("### Панель управления")
     db_loaded = st.button("База данных", use_container_width=True)
@@ -183,23 +187,36 @@ with col_left:
     st.divider()
     st.markdown("**Выборка данных для расчета**")
 
+    def on_technology_change():
+        st.session_state.plants_data[active_id]["technology"] = st.session_state[f"tech_sel_{active_id}"]
+        st.session_state[f"need_calc_{active_id}"] = True
+
+
+    def on_slider_change():
+        val = st.session_state[f"slider_{active_id}"]
+        st.session_state.plants_data[active_id]["start_yr"] = val[0]
+        st.session_state.plants_data[active_id]["end_yr"] = val[1]
+        st.session_state[f"need_calc_{active_id}"] = True
+
+
+    # Список технологий
     technology = st.selectbox(
         "Технология переработки:",
         options=[1, 2],
         index=current_config["technology"] - 1,
-        key=f"tech_sel_{active_id}"
+        key=f"tech_sel_{active_id}",
+        on_change=on_technology_change  # Привязываем колбэк
     )
-    st.session_state.plants_data[active_id]["technology"] = technology
 
+    # Слайдер для времиени (пока не используем)
     start_yr, end_yr = st.slider(
         "Временной диапазон (годы):",
         min_value=2030, max_value=2050,
         value=(current_config["start_yr"], current_config["end_yr"]),
         step=1,
-        key=f"slider_{active_id}"
+        key=f"slider_{active_id}",
+        on_change=on_slider_change
     )
-    st.session_state.plants_data[active_id]["start_yr"] = start_yr
-    st.session_state.plants_data[active_id]["end_yr"] = end_yr
 
     st.divider()
     st.markdown("**Инструменты и реакторы**")
@@ -215,15 +232,31 @@ with col_left:
 
     st.divider()
     st.caption(f"Источник данных: {current_config['folder_path']}")
-plant = load_base_excel_files(current_config["folder_path"], current_config["name"])
+# Расчеты
+plant_session_key = f"plant_object_{active_id}"
+calc_trigger_key = f"need_calc_{active_id}"
+# ТРиггер пересчета
+if calc_trigger_key not in st.session_state:
+    st.session_state[calc_trigger_key] = False
+
+# Если завода для текущей вкладки нет в памяти загружаем его с диска
+if plant_session_key not in st.session_state:
+    st.session_state[plant_session_key] = load_base_excel_files(current_config["folder_path"], current_config["name"])
+    st.session_state[calc_trigger_key] = True
+
+# Фиксируем ссылку на объект активного завода
+plant = st.session_state[plant_session_key]
 
 if plant is not None:
-    plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+    if st.session_state[calc_trigger_key]:
+        plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+        # Протим бесконечной рекурсии
+        st.session_state[calc_trigger_key] = False
 
-# централяная колонка
+# центральная колонка
 with col_center:
         if st.session_state.report_mode:
-            st.markdown("### 🛠️ Конструктор отчета Word (.docx)")
+            st.markdown("### Конструктор отчета Word (.docx)")
             st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
 
             from logic import ReportConstructor
@@ -280,95 +313,21 @@ with col_center:
                 btn_build_col, btn_cancel_col = st.columns(2)
 
                 with btn_build_col:
-                    # финальная сборка
                     if st.button("Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
                         with st.spinner("Идет генерация документа конструктором..."):
                             from office import ReportDocument
 
+                            # Инициализируем документ и отдаем всю рутину сборки в office.py
                             doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
+                            saved_file = doc_report.BuildDocumentFromQueue(
+                                constructor_queue=st.session_state.constructor_queue,
+                                plants_session_data=st.session_state.plants_data,
+                                start_yr=start_yr, end_yr=end_yr, current_config=current_config
+                            )
 
-                            for elem in st.session_state.constructor_queue:
-                                # Имя элемента как заголовок в Word
-                                plant_title = f"Завод: {elem['plant_name']} | " if elem['plant_name'] else ""
-                                doc_report.AddHeading(f"{plant_title}{elem['label']}", level=1)
-                                current_plant_obj = None
-                                if elem['plant_name']:
-                                    for p_id, p_info in st.session_state.plants_data.items():
-                                        if p_info["name"] == elem['plant_name']:
-                                            current_plant_obj = load_base_excel_files(p_info["folder_path"],
-                                                                                      p_info["name"])
-                                            if current_plant_obj:
-                                                current_plant_obj.CalculateMatrices(p_info["technology"],
-                                                                                    p_info["start_yr"],
-                                                                                    p_info["end_yr"])
-                                            break
-
-                                # Сборка таблицы
-                                if elem["type"] == "table":
-                                    target_table = None
-                                    if elem["key"] == "global_t1" and current_plant_obj:
-                                        target_table = current_plant_obj.t1
-                                    elif current_plant_obj:
-                                        if "series" in elem["field_name"]:
-                                            series_dict = getattr(current_plant_obj, elem["field_name"]).get(
-                                                elem["tech"], {})
-                                            target_table = series_dict.get(elem["year"])
-                                        elif elem["field_name"] == "t7":
-                                            target_table = current_plant_obj.t7.get(elem["tech"])
-                                        else:
-                                            target_table = getattr(current_plant_obj, elem["field_name"])
-
-                                    if target_table:
-                                        doc_report.AddParagraph(getattr(target_table, 'description', ''))
-                                        doc_report.AddTable(target_table)
-                                        doc_report.AddPageBreak()
-
-                                # Сбокаграфика
-                                elif elem["type"] == "graph" and current_plant_obj:
-                                    fig, ax = plt.subplots(figsize=(10, 5))
-                                    if elem["field_name"] == "graph_t7" and current_plant_obj.t7.get(
-                                            current_config["technology"]):
-                                        active_t7 = current_plant_obj.t7[current_config["technology"]]
-
-                                        visualizer = NuclearDataVisualizer()
-                                        t7_data = visualizer.GetT7PlotData(active_t7_obj=active_t7)
-
-                                        fig, ax = plt.subplots(figsize=(10, 5))
-                                        colors = {
-                                            "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",
-                                            "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",
-                                            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b"
-                                        }
-
-                                        for label_name, y_values in t7_data.items():
-                                            line_style = '--' if 'Всего' in label_name else '-'
-                                            ax.plot(years_range, y_values, linestyle=line_style, marker='o',
-                                                    color=colors[label_name], label=label_name)
-
-                                        ax.grid(True, linestyle='--', alpha=0.5)
-                                        ax.legend()
-                                        doc_report.AddPlot(fig, title=elem["label"], width_inches=elem["size"])
-                                        doc_report.AddPageBreak()
-
-                                    elif elem["field_name"] == "graph_sens" and current_plant_obj.t7.get(
-                                            current_config["technology"]):
-                                        p_min_c = st.session_state.get('current_min_pct', 50)
-                                        p_max_c = st.session_state.get('current_max_pct', 150)
-                                        x_p, y_v = current_plant_obj.RunSensitivityAnalysis(
-                                            current_config["technology"], start_yr, end_yr, p_min_c, p_max_c)
-                                        ax.plot(x_p, y_v, marker='s', color='#d9534f', linewidth=2)
-
-                                    ax.set_xlabel("Показатели")
-                                    ax.grid(True, linestyle='--', alpha=0.5)
-                                    ax.legend()
-                                    doc_report.AddPlot(fig, title=elem["label"], width_inches=elem["size"])
-                                    doc_report.AddPageBreak()
-
-                            # Сохраняем и выводим имя созданного файла
-                            saved_file = doc_report.Save()
-                            st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран конструктором!"
-                            st.session_state.constructor_queue = []  # Очищаем очередь
-                            st.session_state.report_mode = False  # Выключаем конструктор
+                            st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран!"
+                            st.session_state.constructor_queue = []
+                            st.session_state.report_mode = False
                             st.rerun()
 
                 with btn_cancel_col:
@@ -389,8 +348,14 @@ with col_center:
                 "Таблица Т7 (Итоговая накопительная)": "t7"
             }
 
-            selected_label = st.selectbox("Выберите активную таблицу для отображения:", options=list(matrix_options.keys()))
+            selected_label = st.selectbox("Выберите активную таблицу для отображения:",
+                                          options=list(matrix_options.keys()))
             table_field_name = matrix_options[selected_label]
+            storage_key = f"edited_df_{table_field_name}_{active_id}"
+            for key in list(st.session_state.keys()):
+                if "edited_df_" in key and key != storage_key:
+                    del st.session_state[key]
+
             active_table_obj = None
             selected_year = "all"
 
@@ -427,85 +392,63 @@ with col_center:
                         else:
                             pass
 
-        tab_table, tab_graph, tab_sensitivity = st.tabs(
-            ["Табличный вид", "Графическое отображение", "Анализ чувствительности"]
+        # центральные вкладки
+        tab_table, tab_graph, tab_sensitivity, tab_burial_tab, tab_burial_graph = st.tabs(
+            ["Табличный вид", "Графическое отображение", "Анализ чувствительности", "📋 Баланс ПЗРО (Таблица)",
+             "Заполнение ПЗРО (График)"]
         )
+
         with tab_table:
             if active_table_obj is not None:
-                raw_matrix = [[cell.value for cell in row] for row in active_table_obj.matrix]
+                df_display = active_table_obj.ToDataFrame()
 
-                if len(raw_matrix) > 0:
-                    max_cols = max(len(row) for row in raw_matrix)
-                    headers = []
-                    first_row = raw_matrix[0]
-                    for cell_val in first_row:
-                        if cell_val is None:
-                            val_str = ""
-                        elif isinstance(cell_val, (list, tuple)):
-                            val_str = " ".join([str(v).strip() for v in cell_val if v is not None])
-                        else:
-                            val_str = str(cell_val).strip()
+                if not df_display.empty:
+                    if table_field_name in ["t1", "t2", "t3", "t4"]:
+                        storage_key = f"edited_df_{table_field_name}_{active_id}"
+                        if storage_key not in st.session_state:
+                            st.session_state[storage_key] = df_display
 
-                        if val_str.lower() == "nan" or val_str == "None":
-                            val_str = ""
-                        headers.append(val_str)
-                    if len(headers) < max_cols:
-                        headers.extend([""] * (max_cols - len(headers)))
-                    elif len(headers) > max_cols:
-                        headers = headers[:max_cols]
-                    seen = {}
-                    for idx, h in enumerate(headers):
-                        if h in seen:
-                            seen[h] += 1
-                            headers[idx] = h + (" " * seen[h])
-                        else:
-                            seen[h] = 0
-                    body_data = []
-                    for row in raw_matrix[1:]:
-                        if len(row) == 0:
-                            continue
-                        new_row = []
-                        for cell_val in row:
-                            if cell_val is None or str(cell_val).lower() == "nan" or str(cell_val) == "None":
-                                new_row.append("")
-                            else:
-                                new_row.append(cell_val)
+                        edited_df = st.data_editor(st.session_state[storage_key], use_container_width=True,
+                                                   hide_index=True, height=380,
+                                                   key=f"editor_action_{table_field_name}_{active_id}")
 
-                        if len(new_row) < max_cols:
-                            new_row.extend([""] * (max_cols - len(new_row)))
-                        elif len(new_row) > max_cols:
-                            new_row = new_row[:max_cols]
-                        body_data.append(new_row)
-                    df_display = pd.DataFrame(body_data, columns=headers)
-                    st.dataframe(
-                        df_display, use_container_width=True, hide_index=True, height=380,
-                        key=f"df_{table_field_name}_{start_yr}_{end_yr}_{technology}_{selected_year}"
-                    )
+                        if not edited_df.equals(st.session_state[storage_key]):
+                            active_table_obj.UpdateFromDataFrame(old_df=st.session_state[storage_key], new_df=edited_df)
+                            st.session_state[storage_key] = edited_df
+                            plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                            st.toast("Матрицы обновлены!")
+                            st.rerun()
+                    else:
+                        st.dataframe(df_display, use_container_width=True, hide_index=True, height=380,
+                                     key=f"df_{table_field_name}_{start_yr}_{end_yr}_{technology}_{selected_year}_{active_id}")
                 else:
                     st.info("Выбранная таблица пуста.")
-            else:
-                st.info("Данные отсутствуют или база данных не инициализирована.")
 
         with tab_graph:
             if plant is not None:
                 years_range = list(range(start_yr, end_yr + 1))
-                if not st.session_state.report_mode and table_field_name == "t7":
+                if table_field_name in ["t3", "t4"]:
+                    st.info(
+                        "Графическое отображение для нормативов и удельного тепловыделения (Т3, Т4) не предусмотрено. Используйте Табличный вид.")
+
+                elif not st.session_state.report_mode and table_field_name == "t7":
                     t7_field = getattr(plant, "t7", {})
                     active_t7_obj = t7_field.get(technology) if isinstance(t7_field, dict) else t7_field
 
                     if active_t7_obj is not None:
                         visualizer = NuclearDataVisualizer()
                         t7_data = visualizer.GetT7PlotData(active_t7_obj=active_t7_obj)
+
                         fig, ax = plt.subplots(figsize=(9, 4.2))
 
-                        # цвета для отрисовки массивов
+                        # Цветовая палитра графиков
                         colors = {
-                            "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",
-                            "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",
-                            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b"
+                            "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",  # Красный
+                            "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",  # Оранжевый
+                            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b",  # Зеленый
+                            "4 класс (Всего)": "#5bc0de", "4 класс (Готово)": "#2a6496"  #  Синий
                         }
 
-                        # Отрисовываем 6 линий на холсте в цикле
                         for label_name, y_values in t7_data.items():
                             if len(years_range) == len(y_values):
                                 line_style = '--' if 'Всего' in label_name else '-'
@@ -517,7 +460,6 @@ with col_center:
                                         markersize=marker_size, color=colors[label_name],
                                         label=label_name, linewidth=line_width)
 
-                        # Стилизация осей
                         ax.set_xlabel("Годы", fontsize=10)
                         ax.set_ylabel("Объем РАО, м³", fontsize=10)
                         ax.grid(True, linestyle='--', alpha=0.5)
@@ -580,6 +522,45 @@ with col_center:
                                 st.success("Моделирование чувствительности успешно завершено!")
                     else:
                         st.error("Нет данных для проведения анализа. Проверьте загрузку таблиц завода.")
+        # Визуализация заполнения захоронений
+        with tab_burial_graph:
+            st.markdown("### График заполнения отраслевых ПЗРО накопительным итогом")
+            st.caption(
+                "Сплошные линии показывают реальный объем РАО в хранилище, пунктирные горизонтальные линии — максимальный проектный лимит ПЗРО.")
+            from logic import GetBurialAccumulationData
+
+            burial_plot_data = GetBurialAccumulationData(
+                plants_session_dict=st.session_state.plants_data,
+                start_yr=start_yr,
+                end_yr=end_yr
+            )
+            fig_b, ax_b = plt.subplots(figsize=(9, 4.5))
+            yrs = burial_plot_data["years"]
+
+            # Настройка цветов для классов РАО
+            b_config = {
+                "1 класс (ПГЗР)": {"color": "#942a27", "limit": 40000.0, "label": "1 кл (Глубинное)"},
+                "2 класс (ПГЗР)": {"color": "#b57d28", "limit": 60000.0, "label": "2 кл (Глубинное)"},
+                "3 класс (ППЗР)": {"color": "#2b702b", "limit": 40000.0, "label": "3 кл (Приповерхн.)"},
+                "4 класс (ППЗР)": {"color": "#2a6496", "limit": 100000.0, "label": "4 кл (Приповерхн.)"}
+            }
+
+            for key, cfg in b_config.items():
+                # Дополнительные линии
+                y_vals = burial_plot_data[key]
+                ax_b.plot(yrs, y_vals, linestyle='-', marker='o', markersize=4,
+                          color=cfg["color"], label=f"{cfg['label']}", linewidth=2.5)
+                ax_b.axhline(y=cfg["limit"], color=cfg["color"], linestyle='--', alpha=0.6, linewidth=1.2)
+
+            # Оформление холста графика
+            ax_b.set_xlabel("Годы", fontsize=10)
+            ax_b.set_ylabel("Заполненный объем, м³", fontsize=10)
+            ax_b.grid(True, linestyle='--', alpha=0.4)
+            ax_b.xaxis.set_major_locator(MultipleLocator(5))
+            ax_b.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+            st.pyplot(fig_b, clear_figure=True)
+            plt.close()
+
 # Правая колонка
 with col_right:
     st.markdown("### Параметры конфигурации")
