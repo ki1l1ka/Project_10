@@ -239,12 +239,11 @@ calc_trigger_key = f"need_calc_{active_id}"
 if calc_trigger_key not in st.session_state:
     st.session_state[calc_trigger_key] = False
 
-# Если завода для текущей вкладки нет в памяти загружаем его с диска
+# Если завода для текущей вкладки нет в памяти то загружаем
 if plant_session_key not in st.session_state:
     st.session_state[plant_session_key] = load_base_excel_files(current_config["folder_path"], current_config["name"])
     st.session_state[calc_trigger_key] = True
 
-# Фиксируем ссылку на объект активного завода
 plant = st.session_state[plant_session_key]
 
 if plant is not None:
@@ -256,85 +255,12 @@ if plant is not None:
 # центральная колонка
 with col_center:
         if st.session_state.report_mode:
-            st.markdown("### Конструктор отчета Word (.docx)")
-            st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
-
-            from logic import ReportConstructor
-
-            constructor = ReportConstructor()
-            # Получаем полный список всех доступных таблиц и графиков по всем заводам
-            available_items = constructor.GetAvailableElements(st.session_state.plants_data, start_yr, end_yr)
-            with st.container(border=True):
-                st.markdown("**Шаг 1. Добавить элемент в документ**")
-                item_options = {item["label"] + (f" ({item['group']})" if item['plant_name'] else ""): item for item in
-                                available_items}
-                selected_item_label = st.selectbox("Выберите таблицу или график для вставки:",
-                                                   options=list(item_options.keys()))
-
-                # Ползунок масштабирования (пока в дюймах)
-                element_size = st.slider("Ширина элемента в документе (дюймы):", min_value=2.0, max_value=8.0,
-                                         value=5.5, step=0.5)
-
-                if st.button("➕ Добавить выбранный элемент в очередь отчета", use_container_width=True):
-                    chosen_meta = item_options[selected_item_label]
-                    # Записываем элемент в очередь
-                    st.session_state.constructor_queue.append({
-                        "key": chosen_meta["key"],
-                        "type": chosen_meta["type"],
-                        "label": chosen_meta["label"],
-                        "field_name": chosen_meta["field_name"],
-                        "plant_name": chosen_meta["plant_name"],
-                        "tech": chosen_meta.get("tech"),
-                        "year": chosen_meta.get("year"),
-                        "size": element_size
-                    })
-                    st.toast("Элемент добавлен в очередь отчета!")
-                    st.rerun()
-
-            st.markdown("**Шаг 2. Текущая структура документа (Очередь сборки)**")
-            if not st.session_state.constructor_queue:
-                st.info("Очередь пуста. Добавьте элементы выше.")
-            else:
-                # Выводим очередь в виде списка
-                for idx, q_item in enumerate(st.session_state.constructor_queue):
-                    q_col_text, q_col_size, q_col_del = st.columns([6.0, 2.0, 1.0])
-                    with q_col_text:
-                        prefix = "таблица" if q_item["type"] == "table" else "график"
-                        plant_prefix = f"[{q_item['plant_name']}] " if q_item["plant_name"] else "[Глобальный] "
-                        st.write(f"{idx + 1}. {prefix} {plant_prefix}{q_item['label']}")
-                    with q_col_size:
-                        st.caption(f"Ширина: {q_item['size']} дюйм.")
-                    with q_col_del:
-                        if st.button("удалить", key=f"del_q_{idx}"):
-                            st.session_state.constructor_queue.pop(idx)
-                            st.rerun()
-
-                st.divider()
-                btn_build_col, btn_cancel_col = st.columns(2)
-
-                with btn_build_col:
-                    if st.button("Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
-                        with st.spinner("Идет генерация документа конструктором..."):
-                            from office import ReportDocument
-
-                            # Инициализируем документ и отдаем всю рутину сборки в office.py
-                            doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
-                            saved_file = doc_report.BuildDocumentFromQueue(
-                                constructor_queue=st.session_state.constructor_queue,
-                                plants_session_data=st.session_state.plants_data,
-                                start_yr=start_yr, end_yr=end_yr, current_config=current_config
-                            )
-
-                            st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран!"
-                            st.session_state.constructor_queue = []
-                            st.session_state.report_mode = False
-                            st.rerun()
-
-                with btn_cancel_col:
-                    if st.button("Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
-                        st.session_state.report_mode = False
-                        st.rerun()
-
+            ReportDocument.RenderConstructorUI(
+                start_yr=start_yr, end_yr=end_yr,
+                current_config=current_config,
+                active_id=active_id,
+                technology=technology
+            )
         else:
             st.markdown("### Рабочая область")
 
@@ -347,7 +273,6 @@ with col_center:
                 "Таблица Т6 (Среднее тепловыделение РАО)": "t6_series",
                 "Таблица Т7 (Итоговая накопительная)": "t7"
             }
-
             selected_label = st.selectbox("Выберите активную таблицу для отображения:",
                                           options=list(matrix_options.keys()))
             table_field_name = matrix_options[selected_label]
@@ -391,11 +316,8 @@ with col_center:
                             active_table_obj = active_table_obj.get(technology)
                         else:
                             pass
-
-        # центральные вкладки
-        tab_table, tab_graph, tab_sensitivity, tab_burial_tab, tab_burial_graph = st.tabs(
-            ["Табличный вид", "Графическое отображение", "Анализ чувствительности", "📋 Баланс ПЗРО (Таблица)",
-             "Заполнение ПЗРО (График)"]
+        tab_table, tab_graph, tab_sensitivity, tab_burial_graph = st.tabs(
+            ["Табличный вид", "Графическое отображение", "Анализ чувствительности", "Заполнение ПЗРО (График)"]
         )
 
         with tab_table:
@@ -427,6 +349,8 @@ with col_center:
         with tab_graph:
             if plant is not None:
                 years_range = list(range(start_yr, end_yr + 1))
+                visualizer = NuclearDataVisualizer()
+
                 if table_field_name in ["t3", "t4"]:
                     st.info(
                         "Графическое отображение для нормативов и удельного тепловыделения (Т3, Т4) не предусмотрено. Используйте Табличный вид.")
@@ -436,56 +360,16 @@ with col_center:
                     active_t7_obj = t7_field.get(technology) if isinstance(t7_field, dict) else t7_field
 
                     if active_t7_obj is not None:
-                        visualizer = NuclearDataVisualizer()
-                        t7_data = visualizer.GetT7PlotData(active_t7_obj=active_t7_obj)
-
-                        fig, ax = plt.subplots(figsize=(9, 4.2))
-
-                        # Цветовая палитра графиков
-                        colors = {
-                            "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",  # Красный
-                            "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",  # Оранжевый
-                            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b",  # Зеленый
-                            "4 класс (Всего)": "#5bc0de", "4 класс (Готово)": "#2a6496"  #  Синий
-                        }
-
-                        for label_name, y_values in t7_data.items():
-                            if len(years_range) == len(y_values):
-                                line_style = '--' if 'Всего' in label_name else '-'
-                                marker_style = 'o' if 'Всего' in label_name else 's'
-                                marker_size = 3 if 'Всего' in label_name else 4
-                                line_width = 1.5 if 'Всего' in label_name else 2.5
-
-                                ax.plot(years_range, y_values, linestyle=line_style, marker=marker_style,
-                                        markersize=marker_size, color=colors[label_name],
-                                        label=label_name, linewidth=line_width)
-
-                        ax.set_xlabel("Годы", fontsize=10)
-                        ax.set_ylabel("Объем РАО, м³", fontsize=10)
-                        ax.grid(True, linestyle='--', alpha=0.5)
-                        ax.xaxis.set_major_locator(MultipleLocator(5))
-                        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
-
+                        fig = visualizer.CreateT7PlotInCore(active_t7_obj, years_range)
                         st.pyplot(fig, clear_figure=True)
-                        plt.close()
+                        plt.close(fig)
                     else:
                         st.info("Таблица Т7 еще не рассчитана.")
-
                 else:
-                    fig, ax = plt.subplots(figsize=(9, 4.0))
-                    for reactor in selected_reactors:
-                        import numpy as np
-
-                        volumes = np.cumsum(np.random.randint(15, 60, len(years_range)))
-                        ax.plot(years_range, volumes, marker='o', label=reactor, linewidth=2)
-
-                    ax.set_xlabel("Годы", fontsize=10)
-                    ax.set_ylabel("Значение показателей", fontsize=10)
-                    ax.grid(True, linestyle='--', alpha=0.5)
-                    ax.xaxis.set_major_locator(MultipleLocator(5))
-                    ax.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+                    # Базовый график реакторов из logic.py
+                    fig = visualizer.CreateReactorDefaultPlot(selected_reactors, years_range)
                     st.pyplot(fig, clear_figure=True)
-                    plt.close()
+                    plt.close(fig)
 
             with tab_sensitivity:
                 st.markdown("### Анализ чувствительности объемов РАО 1 класса к конечному году")
@@ -526,41 +410,22 @@ with col_center:
         with tab_burial_graph:
             st.markdown("### График заполнения отраслевых ПЗРО накопительным итогом")
             st.caption(
-                "Сплошные линии показывают реальный объем РАО в хранилище, пунктирные горизонтальные линии — максимальный проектный лимит ПЗРО.")
-            from logic import GetBurialAccumulationData
+                "Сплошные линии показывают фактический объем РАО в ПЗРО, пунктирные линии — максимальный проектный лимит объекта.")
 
-            burial_plot_data = GetBurialAccumulationData(
-                plants_session_dict=st.session_state.plants_data,
-                start_yr=start_yr,
-                end_yr=end_yr
-            )
-            fig_b, ax_b = plt.subplots(figsize=(9, 4.5))
-            yrs = burial_plot_data["years"]
+            if plant is not None:
+                visualizer = NuclearDataVisualizer()
+                # Вызов готовых фигур из logic.py
+                fig_pgzr, fig_ppzr = visualizer.CreateBurialPlotsInCore(st.session_state.plants_data, start_yr, end_yr)
 
-            # Настройка цветов для классов РАО
-            b_config = {
-                "1 класс (ПГЗР)": {"color": "#942a27", "limit": 40000.0, "label": "1 кл (Глубинное)"},
-                "2 класс (ПГЗР)": {"color": "#b57d28", "limit": 60000.0, "label": "2 кл (Глубинное)"},
-                "3 класс (ППЗР)": {"color": "#2b702b", "limit": 40000.0, "label": "3 кл (Приповерхн.)"},
-                "4 класс (ППЗР)": {"color": "#2a6496", "limit": 100000.0, "label": "4 кл (Приповерхн.)"}
-            }
+                st.markdown("####Пункт глубинного захоронения РАО (ПГЗР)")
+                st.pyplot(fig_pgzr, clear_figure=True)
+                plt.close(fig_pgzr)
 
-            for key, cfg in b_config.items():
-                # Дополнительные линии
-                y_vals = burial_plot_data[key]
-                ax_b.plot(yrs, y_vals, linestyle='-', marker='o', markersize=4,
-                          color=cfg["color"], label=f"{cfg['label']}", linewidth=2.5)
-                ax_b.axhline(y=cfg["limit"], color=cfg["color"], linestyle='--', alpha=0.6, linewidth=1.2)
+                st.divider()
 
-            # Оформление холста графика
-            ax_b.set_xlabel("Годы", fontsize=10)
-            ax_b.set_ylabel("Заполненный объем, м³", fontsize=10)
-            ax_b.grid(True, linestyle='--', alpha=0.4)
-            ax_b.xaxis.set_major_locator(MultipleLocator(5))
-            ax_b.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
-            st.pyplot(fig_b, clear_figure=True)
-            plt.close()
-
+                st.markdown("#### Пункт приповерхностного захоронения РАО (ППЗР)")
+                st.pyplot(fig_ppzr, clear_figure=True)
+                plt.close(fig_ppzr)
 # Правая колонка
 with col_right:
     st.markdown("### Параметры конфигурации")

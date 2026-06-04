@@ -176,26 +176,21 @@ class ReportDocument:
                     self.AddParagraph(getattr(target_table, 'description', ''))
                     self.AddTable(target_table)
                     self.AddPageBreak()
-
-            # Сборка графика в отчет
+            # ВНУТРИ office.py (Сборка графиков по новой бэкенд-логике)
             elif elem["type"] == "graph" and current_plant_obj:
-                fig, ax = plt.subplots(figsize=(10, 5))
                 years_range = list(range(start_yr, end_yr + 1))
+                visualizer = NuclearDataVisualizer()
 
-                if elem["field_name"] == "graph_t7" and current_plant_obj.t7.get(current_config["technology"]):
-                    active_t7 = current_plant_obj.t7[current_config["technology"]]
-                    visualizer = NuclearDataVisualizer()
-                    t7_data = visualizer.GetT7PlotData(active_t7_obj=active_t7)
-                    colors = {"1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27", "2 класс (Всего)": "#f0ad4e",
-                              "2 класс (Готово)": "#b57d28", "3 класс (Всего)": "#5cb85c",
-                              "3 класс (Готово)": "#2b702b", "4 класс (Всего)": "#5bc0de",
-                              "4 класс (Готово)": "#2a6496"}
-                    for label_name, y_values in t7_data.items():
-                        line_style = '--' if 'Всего' in label_name else '-'
-                        ax.plot(years_range, y_values, linestyle=line_style, marker='o', color=colors[label_name],
-                                label=label_name)
+                if elem["field_name"] == "graph_t7":
+                    # Забираем из logic.py две раздельные фигуры ПЗРО для вставки в Word
+                    fig_w1, fig_w2 = visualizer.CreateBurialPlotsInCore(plants_session_data, start_yr, end_yr)
+                    self.AddPlot(fig_w1, title="Динамика заполнения ПГЗР (Глубинное)", width_inches=elem["size"])
+                    self.AddPlot(fig_w2, title="Динамика заполнения ППЗР (Приповерхностное)", width_inches=elem["size"])
+                    self.AddPageBreak()
 
-                elif elem["field_name"] == "graph_sens" and current_plant_obj.t7.get(current_config["technology"]):
+
+                # Отрисовка графика чувствительности (остается без изменений)
+                elif elem["field_name"] == "graph_sens":
                     import streamlit as st
                     p_min_c = st.session_state.get('current_min_pct', 50)
                     p_max_c = st.session_state.get('current_max_pct', 150)
@@ -203,10 +198,81 @@ class ReportDocument:
                                                                         p_min_c, p_max_c)
                     ax.plot(x_p, y_v, marker='s', color='#d9534f', linewidth=2)
 
-                ax.set_xlabel("Показатели")
-                ax.grid(True, linestyle='--', alpha=0.5)
-                ax.legend()
-                self.AddPlot(fig, title=elem["label"], width_inches=elem["size"])
-                self.AddPageBreak()
+                    ax.set_xlabel("Показатели")
+                    ax.grid(True, linestyle='--', alpha=0.5)
+                    self.AddPlot(fig, title=elem["label"], width_inches=elem["size"])
+                    self.AddPageBreak()
 
-        return self.Save()
+    @staticmethod
+    def RenderConstructorUI(start_yr, end_yr, current_config, active_id, technology):
+        import streamlit as st
+        import os
+        from logic import ReportConstructor, NuclearDataVisualizer
+
+        st.markdown("###Конструктор отчета Word (.docx)")
+        st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
+
+        constructor = ReportConstructor()
+        available_items = constructor.GetAvailableElements(st.session_state.plants_data, start_yr, end_yr)
+
+        # Форма добавления элементов
+        with st.container(border=True):
+            st.markdown("**Шаг 1. Добавить элемент в документ**")
+            item_options = {item["label"] + (f" ({item['group']})" if item['plant_name'] else ""): item for item in
+                            available_items}
+            selected_item_label = st.selectbox("Выберите таблицу или график для вставки:",
+                                               options=list(item_options.keys()))
+            element_size = st.slider("Ширина элемента в документе (дюймы):", min_value=2.0, max_value=8.0,
+                                     value=5.5, step=0.5)
+
+            if st.button("Добавить выбранный элемент в очередь отчета", use_container_width=True):
+                chosen_meta = item_options[selected_item_label]
+                st.session_state.constructor_queue.append({
+                    "key": chosen_meta["key"], "type": chosen_meta["type"], "label": chosen_meta["label"],
+                    "field_name": chosen_meta["field_name"], "plant_name": chosen_meta["plant_name"],
+                    "tech": chosen_meta.get("tech"), "year": chosen_meta.get("year"), "size": element_size
+                })
+                st.toast("Элемент добавлен в очередь отчета!")
+                st.rerun()
+
+        # Отображение очереди документа
+        st.markdown("**Шаг 2. Текущая структура документа (Очередь сборки)**")
+        if not st.session_state.constructor_queue:
+            st.info("Очередь пуста. Добавьте элементы с помощью формы выше.")
+        else:
+            for idx, q_item in enumerate(st.session_state.constructor_queue):
+                q_col_text, q_col_size, q_col_del = st.columns([6.0, 2.0, 1.0])
+                with q_col_text:
+                    prefix = "таблица" if q_item["type"] == "table" else "график"
+                    plant_prefix = f"[{q_item['plant_name']}] " if q_item["plant_name"] else "[Глобальный] "
+                    st.write(f"{idx + 1}. {prefix} {plant_prefix}{q_item['label']}")
+                with q_col_size:
+                    st.caption(f"Ширина: {q_item['size']} дюйм.")
+                with q_col_del:
+                    if st.button("закрыть", key=f"del_q_{idx}"):
+                        st.session_state.constructor_queue.pop(idx)
+                        st.rerun()
+
+            st.divider()
+
+            # Кнопки действий
+            btn_build_col, btn_cancel_col = st.columns(2)
+            with btn_build_col:
+                if st.button("Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
+                    with st.spinner("Идет генерация документа конструктором..."):
+                        from office import ReportDocument
+                        doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
+                        saved_file = doc_report.BuildDocumentFromQueue(
+                            constructor_queue=st.session_state.constructor_queue,
+                            plants_session_data=st.session_state.plants_data,
+                            start_yr=start_yr, end_yr=end_yr, current_config=current_config
+                        )
+                        st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран!"
+                        st.session_state.constructor_queue = []
+                        st.session_state.report_mode = False
+                        st.rerun()
+
+            with btn_cancel_col:
+                if st.button("Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
+                    st.session_state.report_mode = False
+                    st.rerun()

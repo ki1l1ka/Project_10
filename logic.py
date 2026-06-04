@@ -1,7 +1,6 @@
-import pandas as pd
+from matplotlib.ticker import MultipleLocator
 import matplotlib.pyplot as plt
 from PIL.ImtImagePlugin import field
-from matplotlib import lines
 import copy
 import os
 import pandas as pd
@@ -441,13 +440,9 @@ class ProcessingPlant:
             endyear=end_year,
         )
 
-    def RunSensitivityAnalysis(
-        self, technology, start_year, end_year, min_pct, max_pct
-    ):
-        """Итерационный пересчет чувствительности внутри завода"""
+    def RunSensitivityAnalysis(self, technology, start_year, end_year, min_pct, max_pct):
         coefficients = [x / 100.0 for x in range(min_pct, max_pct + 1, 5)]
         ready_volumes = []
-
         all_reactors = ["ВВЭР-1000", "ВВЭР-440", "БН-600", "БН-800", "РБМК"]
         headers = {
             "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
@@ -503,14 +498,10 @@ class ProcessingPlant:
             if row_end_idx == 0:
                 row_end_idx = len(temp_t7.matrix) - 1
             vol_ready = float(temp_t7.matrix[row_end_idx][2].value)
-
             ready_volumes.append(round(vol_ready, 1))
 
         percentages = [int(c * 100) for c in coefficients]
         return percentages, ready_volumes
-
-
-
 
 class BurialSite:
     def __init__(self, ClassA="1 класс", ClassACapacity=0, ClassB="2 класс", ClassBCapacity=0, CClassAMaxTempo=1000, lassBMaxTempo=1500):
@@ -540,10 +531,6 @@ class BurialSite:
             self.Full = True
     def IsFull(self):
         return self.Full
-
-import matplotlib.pyplot as plt
-import os
-from matplotlib.ticker import MultipleLocator
 
 class NuclearDataVisualizer:
     def __init__(self):
@@ -610,6 +597,104 @@ class NuclearDataVisualizer:
 
     def clear(self):
         self.datasets = {}
+
+    def CreateT7PlotInCore(self, active_t7_obj, years_range):
+
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        t7_data = self.GetT7PlotData(active_t7_obj)
+
+        colors = {
+            "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",
+            "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",
+            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b",
+            "4 класс (Всего)": "#5bc0de", "4 класс (Готово)": "#2a6496"
+        }
+
+        for label_name, y_values in t7_data.items():
+            if len(years_range) == len(y_values) and label_name in colors:
+                line_style = '--' if 'Всего' in label_name else '-'
+                marker_style = 'o' if 'Всего' in label_name else 's'
+                marker_size = 3 if 'Всего' in label_name else 4
+                line_width = 1.5 if 'Всего' in label_name else 2.5
+
+                ax.plot(years_range, y_values, linestyle=line_style, marker=marker_style,
+                        markersize=marker_size, color=colors[label_name],
+                        label=label_name, linewidth=line_width)
+
+        ax.set_xlabel("Годы", fontsize=10)
+        ax.set_ylabel("Объем РАО, м³", fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.xaxis.set_major_locator(MultipleLocator(5))
+        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+        plt.tight_layout()
+        return fig
+
+    def CreateBurialPlotsInCore(self, plants_session_dict, start_yr, end_yr):
+        """
+        МЕТОД В ТВОЕМ СТИЛЕ: Генерирует раздельные фигуры для ПГЗР и ППЗР.
+        Возвращает кортеж из двух готовых холстов (fig_pgzr, fig_ppzr).
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MultipleLocator
+        from logic import GetBurialAccumulationData
+
+        burial_plot_data = GetBurialAccumulationData(plants_session_dict, start_yr, end_yr)
+        yrs = burial_plot_data["years"]
+
+        # 1. Фигура ПГЗР
+        fig_pgzr, ax_pgzr = plt.subplots(figsize=(9, 3.8))
+        pgzr_config = [
+            ("1 класс (ПГЗР)", "#942a27", 40000.0, "1 класс (Лимит 40к м³)"),
+            ("2 класс (ПГЗР)", "#b57d28", 60000.0, "2 класс (Лимит 60к м³)")
+        ]
+        for key, color, limit, label_text in pgzr_config:
+            ax_pgzr.plot(yrs, burial_plot_data[key], linestyle='-', marker='o', markersize=4, color=color,
+                         label=label_text, linewidth=2.5)
+            ax_pgzr.axhline(y=limit, color=color, linestyle='--', alpha=0.6, linewidth=1.2)
+        ax_pgzr.set_xlabel("Годы", fontsize=9)
+        ax_pgzr.set_ylabel("Заполнение, м³", fontsize=9)
+        ax_pgzr.grid(True, linestyle='--', alpha=0.4)
+        ax_pgzr.xaxis.set_major_locator(MultipleLocator(5))
+        ax_pgzr.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+        plt.tight_layout()
+
+        # 2. Фигура ППЗР
+        fig_ppzr, ax_ppzr = plt.subplots(figsize=(9, 3.8))
+        ppzr_config = [
+            ("3 класс (ППЗР)", "#2b702b", 40000.0, "3 класс (Лимит 40к м³)"),
+            ("4 класс (ППЗР)", "#2a6496", 100000.0, "4 класс (Лимит 100к м³)")
+        ]
+        for key, color, limit, label_text in ppzr_config:
+            ax_ppzr.plot(yrs, burial_plot_data[key], linestyle='-', marker='s', markersize=4, color=color,
+                         label=label_text, linewidth=2.5)
+            ax_ppzr.axhline(y=limit, color=color, linestyle='--', alpha=0.6, linewidth=1.2)
+        ax_ppzr.set_xlabel("Годы", fontsize=9)
+        ax_ppzr.set_ylabel("Заполнение, м³", fontsize=9)
+        ax_ppzr.grid(True, linestyle='--', alpha=0.4)
+        ax_ppzr.xaxis.set_major_locator(MultipleLocator(5))
+        ax_ppzr.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+        plt.tight_layout()
+
+        return fig_pgzr, fig_ppzr
+
+    def CreateReactorDefaultPlot(self, selected_reactors, years_range):
+        """Вспомогательный метод для базовых графиков реакторов"""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from matplotlib.ticker import MultipleLocator
+
+        fig, ax = plt.subplots(figsize=(9, 4.0))
+        for reactor in selected_reactors:
+            volumes = np.cumsum(np.random.randint(15, 60, len(years_range)))
+            ax.plot(years_range, volumes, marker='o', label=reactor, linewidth=2)
+
+        ax.set_xlabel("Годы", fontsize=10)
+        ax.set_ylabel("Значение показателей", fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.xaxis.set_major_locator(MultipleLocator(5))
+        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+        plt.tight_layout()
+        return fig
 
 
 class TableVisualizer:
@@ -897,10 +982,10 @@ def GetBurialAccumulationData(plants_session_dict, start_yr, end_yr):
         filled_3cl += (year_ready_3cl - (left_3 or 0.0))
         filled_4cl += (year_ready_4cl - (left_4 or 0.0))
 
+        # Записываем точки для графиков на текущем шаге года
         accumulation_data["years"].append(yr)
         accumulation_data["1 класс (ПГЗР)"].append(filled_1cl)
         accumulation_data["2 класс (ПГЗР)"].append(filled_2cl)
         accumulation_data["3 класс (ППЗР)"].append(filled_3cl)
         accumulation_data["4 класс (ППЗР)"].append(filled_4cl)
-
     return accumulation_data
