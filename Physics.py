@@ -17,9 +17,7 @@ FuelTypes = {"ВВЭР-440": SpentNuclearFuel(0, 0, 0, 0),
              "РБМК-1000": SpentNuclearFuel(0, 0, 0, 0),
              "РБМК-1500": SpentNuclearFuel(0, 0, 0, 0),}
 # для BuryReady
-FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2}
-
+# FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2, "4 класс": 1.0}
+# HalfLives = {"1 класс": 3.0, "2 класс": 3.0, "3 класс": 3.0, "4 класс": 3.0}
 def Heat(n0, t, half_life):
     return n0 / (2 ** (t / half_life))
-
-print(Heat(10, 5, 3))

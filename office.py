@@ -197,7 +197,6 @@ class ReportDocument:
                     x_p, y_v = current_plant_obj.RunSensitivityAnalysis(current_config["technology"], start_yr, end_yr,
                                                                         p_min_c, p_max_c)
                     ax.plot(x_p, y_v, marker='s', color='#d9534f', linewidth=2)
-
                     ax.set_xlabel("Показатели")
                     ax.grid(True, linestyle='--', alpha=0.5)
                     self.AddPlot(fig, title=elem["label"], width_inches=elem["size"])
@@ -271,7 +270,6 @@ class ReportDocument:
                         st.session_state.constructor_queue = []
                         st.session_state.report_mode = False
                         st.rerun()
-
             with btn_cancel_col:
                 if st.button("Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
                     st.session_state.report_mode = False

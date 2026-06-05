@@ -6,6 +6,10 @@ import os
 import pandas as pd
 from Physics import *
 import streamlit as st
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator
 FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2, "4 класс": 0.3}
 # Создание таблицы
 def TableExcel(FileName):
@@ -20,7 +24,7 @@ def TableCreate(headers=['', ''], lines=['', '']):
 # Подсчёт объёмов РАО готовых к захоронению
 def BuryReady(Table4, Tables5, FuelType, FuelClass, technology=1, StartYear=2030, EndYear=2033):
     FirstHeat = Table4.matrix[Table4.FindValue(FuelType)['row']][Table4.FindValue(FuelClass, start=(technology-1)*5)['column']].value
-    HalfLife=3.0
+    HalfLife= st.session_state.HalfLife[FuelClass]
     TotalVolume = 0
     BuryReadyVolume = 0
     Table5Row = Tables5[StartYear].FindValue(FuelType)['row']
@@ -47,7 +51,7 @@ class Cell:
 class Table:
     def __init__(self, table=[['', ''], ['', '']], description='Таблица'):
         self.description = description
-        self.matrix = [[Cell(table[row][column]) for column in range(len(table[row]))] for row in range(len(table))]
+        self.matrix = [[Cell(table[row][column]) for column in range(len(table[rows]))] for row in range(len(table))]
     def ToTable(self):
         return [[self.matrix[row][cell] for row in range(len(self.matrix))] for cell in range(len(self.matrix[0]))]
     def Show(self):
@@ -140,7 +144,6 @@ class Table:
         raw_matrix = [[cell.value for cell in row] for row in self.matrix]
         if len(raw_matrix) == 0:
             return pd.DataFrame()
-
         max_cols = max(len(row) for row in raw_matrix)
         headers = []
         for cell_val in raw_matrix[0]:
@@ -370,14 +373,12 @@ class ProcessingPlant:
             # Считываем таблицы завода (t2, t3, t4) из его собственной папки
             self.t2 = Table(pd.read_excel(os.path.join(self.folder_path, "t2.xlsx"), header=None).to_numpy(),
                             description=f"Таблица Т2. Данные по загрузке завода ОЯТ — {self.name}")
-
             self.t3 = Table(pd.read_excel(os.path.join(self.folder_path, "t3.xlsx"), header=None).to_numpy(),
                             description=f"Таблица Т3. Образование РАО различных классов — {self.name}")
-
             self.t4 = Table(pd.read_excel(os.path.join(self.folder_path, "t4.xlsx"), header=None).to_numpy(),
                             description=f"Таблица Т4. Тепловыделение РАО сразу после переработки — {self.name}")
 
-            print(f"✔️ Данные для '{self.name}' успешно инициализированы (Т1 взята из общего корня)")
+            print(f"Данные для '{self.name}' успешно инициализированы (Т1 взята из общего корня)")
         except Exception as e:
             raise IOError(f"Критическая ошибка при парсинге Excel-таблиц для {self.name}: {e}")
 
@@ -390,9 +391,7 @@ class ProcessingPlant:
         headers = {
             "t5": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
             "t6": ["Завод", "1 класс", "2 класс", "3 класс", "4 класс"],
-            # ИСПРАВЛЕНИЕ: Шапка Т7 расширена до 9 колонок
-            "t7": [
-                "Год",
+            "t7": ["Год",
                 "1 класс", "Готово к захоронению",
                 "2 класс", "Готово к захоронению",
                 "3 класс", "Готово к захоронению",
@@ -401,7 +400,6 @@ class ProcessingPlant:
         }
 
         lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
-
         # Считаем Т5 и Т6 по годам
         for y in range(start_year, end_year + 1):
             self.t5_series[technology][y] = CreatedTable(
@@ -414,7 +412,6 @@ class ProcessingPlant:
                 year=y,
                 technology=technology,
             )
-
             self.t6_series[technology][y] = CreatedTable(
                 TableCreate(headers["t6"], lines["t6"])
             )
@@ -425,7 +422,6 @@ class ProcessingPlant:
                 year=y,
                 technology=technology,
             )
-
         # Считаем итоговую Т7
         self.t7[technology] = CreatedTable(
             TableCreate(headers["t7"]),
@@ -439,7 +435,6 @@ class ProcessingPlant:
             startyear=start_year,
             endyear=end_year,
         )
-
     def RunSensitivityAnalysis(self, technology, start_year, end_year, min_pct, max_pct):
         coefficients = [x / 100.0 for x in range(min_pct, max_pct + 1, 5)]
         ready_volumes = []
@@ -457,12 +452,9 @@ class ProcessingPlant:
             ],
         }
         lines = {"t5": ["Завод"] + all_reactors}
-
         start_col_shift = 5 * (technology - 1)
-
         for coeff in coefficients:
             temp_t4 = copy.deepcopy(self.t4)
-
             for reactor in all_reactors:
                 row_idx = temp_t4.FindValue(reactor)["row"]
                 col_idx = temp_t4.FindValue("1 класс", start=start_col_shift)[
@@ -470,7 +462,6 @@ class ProcessingPlant:
                 ]
                 original_value = float(temp_t4.matrix[row_idx][col_idx].value)
                 temp_t4.matrix[row_idx][col_idx].value = original_value * coeff
-
             temp_t5_series = {}
             for year in range(start_year, end_year + 1):
                 temp_t5_series[year] = CreatedTable(
@@ -483,7 +474,6 @@ class ProcessingPlant:
                     year=year,
                     technology=technology,
                 )
-
             temp_t7 = CreatedTable(TableCreate(headers["t7"]))
             temp_t7.T7Create(
                 temp_t4,
@@ -493,18 +483,15 @@ class ProcessingPlant:
                 startyear=start_year,
                 endyear=end_year,
             )
-
             row_end_idx = temp_t7.FindValue(end_year)["row"]
             if row_end_idx == 0:
                 row_end_idx = len(temp_t7.matrix) - 1
             vol_ready = float(temp_t7.matrix[row_end_idx][2].value)
             ready_volumes.append(round(vol_ready, 1))
-
         percentages = [int(c * 100) for c in coefficients]
         return percentages, ready_volumes
-
 class BurialSite:
-    def __init__(self, ClassA="1 класс", ClassACapacity=0, ClassB="2 класс", ClassBCapacity=0, CClassAMaxTempo=1000, lassBMaxTempo=1500):
+    def __init__(self, ClassA="1 класс", ClassACapacity=0, ClassB="2 класс", ClassBCapacity=0, ClassAMaxTempo=1000, ClassBMaxTempo=1500):
         self.Capacities = {str(ClassA): float(ClassACapacity), str(ClassB): float(ClassBCapacity)}
         self.FullCapacity = ClassACapacity + ClassBCapacity # Предполагается захоронение только двух классов на объект
         self.Full = False
@@ -571,7 +558,7 @@ class NuclearDataVisualizer:
             "2 класс (Всего)": [], "2 класс (Готово)": [],
             "3 класс (Всего)": [], "3 класс (Готово)": [],
             "4 класс (Всего)": [], "4 класс (Готово)": []
-        }# В последних расчетах учитывается и 4-й класс
+        }# Сейчас учитывается и 4-й класс
 
         if active_t7_obj is None or not hasattr(active_t7_obj, 'matrix'):
             return plot_data
@@ -630,18 +617,9 @@ class NuclearDataVisualizer:
         return fig
 
     def CreateBurialPlotsInCore(self, plants_session_dict, start_yr, end_yr):
-        """
-        МЕТОД В ТВОЕМ СТИЛЕ: Генерирует раздельные фигуры для ПГЗР и ППЗР.
-        Возвращает кортеж из двух готовых холстов (fig_pgzr, fig_ppzr).
-        """
-        import matplotlib.pyplot as plt
-        from matplotlib.ticker import MultipleLocator
-        from logic import GetBurialAccumulationData
-
         burial_plot_data = GetBurialAccumulationData(plants_session_dict, start_yr, end_yr)
         yrs = burial_plot_data["years"]
-
-        # 1. Фигура ПГЗР
+        # ПГЗР
         fig_pgzr, ax_pgzr = plt.subplots(figsize=(9, 3.8))
         pgzr_config = [
             ("1 класс (ПГЗР)", "#942a27", 40000.0, "1 класс (Лимит 40к м³)"),
@@ -657,8 +635,7 @@ class NuclearDataVisualizer:
         ax_pgzr.xaxis.set_major_locator(MultipleLocator(5))
         ax_pgzr.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
         plt.tight_layout()
-
-        # 2. Фигура ППЗР
+        # ППЗР
         fig_ppzr, ax_ppzr = plt.subplots(figsize=(9, 3.8))
         ppzr_config = [
             ("3 класс (ППЗР)", "#2b702b", 40000.0, "3 класс (Лимит 40к м³)"),
@@ -678,11 +655,6 @@ class NuclearDataVisualizer:
         return fig_pgzr, fig_ppzr
 
     def CreateReactorDefaultPlot(self, selected_reactors, years_range):
-        """Вспомогательный метод для базовых графиков реакторов"""
-        import matplotlib.pyplot as plt
-        import numpy as np
-        from matplotlib.ticker import MultipleLocator
-
         fig, ax = plt.subplots(figsize=(9, 4.0))
         for reactor in selected_reactors:
             volumes = np.cumsum(np.random.randint(15, 60, len(years_range)))
@@ -814,8 +786,7 @@ class ReportConstructor:
     def GetAvailableElements(self, plants_session_dict, start_yr, end_yr):
         registry = []
         first_plant_id = list(plants_session_dict.keys())[0] if plants_session_dict else None
-
-        # Т1 как глобальный элемент
+        # Т1
         registry.append({
             "key": "global_t1",
             "type": "table",
@@ -989,3 +960,287 @@ def GetBurialAccumulationData(plants_session_dict, start_yr, end_yr):
         accumulation_data["3 класс (ППЗР)"].append(filled_3cl)
         accumulation_data["4 класс (ППЗР)"].append(filled_4cl)
     return accumulation_data
+
+
+class InterfaceRenderer:
+    @staticmethod
+    def RenderTableUI(active_table_obj, table_field_name, active_id, start_yr, end_yr, technology, selected_year,
+                      plant):
+        if active_table_obj is None:
+            st.info("Данные отсутствуют или папка сценария не задана.")
+            return
+
+        # Получаем DataFrame из матрицы объектов Cell
+        df_display = active_table_obj.ToDataFrame()
+        if df_display.empty:
+            st.info("Выбранная таблица пуста.")
+            return
+        if table_field_name in ["t1", "t2", "t3", "t4"]:
+            storage_key = f"edited_df_{table_field_name}_{active_id}"
+            if storage_key not in st.session_state:
+                st.session_state[storage_key] = df_display
+            # редактор ячеек в сессии
+            edited_df = st.data_editor(
+                st.session_state[storage_key],
+                use_container_width=True,
+                hide_index=True,
+                height=380,
+                key=f"editor_action_{table_field_name}_{active_id}"
+            )
+
+            if not edited_df.equals(st.session_state[storage_key]):
+                with st.spinner("Пересчет моделей по новым значениям ячеек..."):
+                    active_table_obj.UpdateFromDataFrame(old_df=st.session_state[storage_key], new_df=edited_df)
+                    st.session_state[storage_key] = edited_df
+                    plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                    st.toast("Матрицы успешно обновлены в памяти!")
+                    st.rerun()
+        else:
+            st.dataframe(
+                df_display, use_container_width=True, hide_index=True, height=380,
+                key=f"df_{table_field_name}_{start_yr}_{end_yr}_{technology}_{selected_year}_{active_id}"
+            )
+
+    @staticmethod
+    def RenderConstructorUI(start_yr, end_yr, current_config, active_id, technology):
+        import streamlit as st
+        import os
+        from app import load_base_excel_files
+        st.markdown("###Конструктор отчета Word (.docx)")
+        st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
+        constructor = ReportConstructor()
+        available_items = constructor.GetAvailableElements(st.session_state.plants_data, start_yr, end_yr)
+        with st.container(border=True):
+            st.markdown("**Шаг 1. Добавить элемент в документ**")
+            item_options = {item["label"] + (f" ({item['group']})" if item['plant_name'] else ""): item for item in
+                            available_items}
+            selected_item_label = st.selectbox("Выберите таблицу или график для вставки:",
+                                               options=list(item_options.keys()))
+            element_size = st.slider("Ширина элемента в документе (дюймы):", min_value=2.0, max_value=8.0, value=5.5,
+                                     step=0.5)
+            if st.button("Добавить выбранный элемент в очередь отчета", use_container_width=True):
+                chosen_meta = item_options[selected_item_label]
+                st.session_state.constructor_queue.append({
+                    "key": chosen_meta["key"], "type": chosen_meta["type"], "label": chosen_meta["label"],
+                    "field_name": chosen_meta["field_name"], "plant_name": chosen_meta["plant_name"],
+                    "tech": chosen_meta.get("tech"), "year": chosen_meta.get("year"), "size": element_size
+                })
+                st.toast("Элемент добавлен в очередь отчета!")
+                st.rerun()
+
+        st.markdown("**Шаг 2. Текущая структура документа (Очередь сборки)**")
+        if not st.session_state.constructor_queue:
+            st.info("Очередь пуста. Добавьте элементы с помощью формы выше.")
+        else:
+            for idx, q_item in enumerate(st.session_state.constructor_queue):
+                q_col_text, q_col_size, q_col_del = st.columns([6.0, 2.0, 1.0])
+                with q_col_text:
+                    prefix = "📊" if q_item["type"] == "table" else "📈"
+                    plant_prefix = f"[{q_item['plant_name']}] " if q_item["plant_name"] else "[Глобальный] "
+                    st.write(f"{idx + 1}. {prefix} {plant_prefix}{q_item['label']}")
+                with q_col_size:
+                    st.caption(f"Ширина: {q_item['size']} дюйм.")
+                with q_col_del:
+                    if st.button("❌", key=f"del_q_{idx}"):
+                        st.session_state.constructor_queue.pop(idx)
+                        st.rerun()
+
+            st.divider()
+
+            btn_build_col, btn_cancel_col = st.columns(2)
+            with btn_build_col:
+                if st.button("🚀 Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
+                    with st.spinner("Идет генерация документа конструктором..."):
+                        from office import ReportDocument
+                        doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
+                        saved_file = doc_report.BuildDocumentFromQueue(
+                            constructor_queue=st.session_state.constructor_queue,
+                            plants_session_data=st.session_state.plants_data,
+                            start_yr=start_yr, end_yr=end_yr, current_config=current_config
+                        )
+                        st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран!"
+                        st.session_state.constructor_queue = []
+                        st.session_state.report_mode = False
+                        st.rerun()
+
+            with btn_cancel_col:
+                if st.button("↩️ Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
+                    st.session_state.report_mode = False
+                    st.rerun()
+
+
+class InterfaceRenderer:
+    @staticmethod
+    def RenderTableUI(active_table_obj, table_field_name, active_id, start_yr, end_yr, technology, selected_year,
+                      plant):
+        import streamlit as st
+
+        if active_table_obj is None:
+            st.info("Данные отсутствуют или папка сценария не задана.")
+            return
+
+        # Получаем чистый DataFrame из матрицы объектов Cell
+        df_display = active_table_obj.ToDataFrame()
+
+        if df_display.empty:
+            st.info("Выбранная таблица пуста.")
+            return
+
+        # Разделяем просмотр и корректировку данных
+        if table_field_name in ["t1", "t2", "t3", "t4"]:
+            storage_key = f"edited_df_{table_field_name}_{active_id}"
+
+            if storage_key not in st.session_state:
+                st.session_state[storage_key] = df_display
+
+            # Интерактивный редактор ячеек в памяти сессии
+            edited_df = st.data_editor(
+                st.session_state[storage_key],
+                use_container_width=True,
+                hide_index=True,
+                height=380,
+                key=f"editor_action_{table_field_name}_{active_id}"
+            )
+
+            if not edited_df.equals(st.session_state[storage_key]):
+                with st.spinner("Пересчет моделей по новым значениям ячеек..."):
+                    active_table_obj.UpdateFromDataFrame(old_df=st.session_state[storage_key], new_df=edited_df)
+                    st.session_state[storage_key] = edited_df
+                    plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+                    st.toast("Матрицы успешно обновлены в памяти!")
+                    st.rerun()
+        else:
+            st.dataframe(
+                df_display, use_container_width=True, hide_index=True, height=380,
+                key=f"df_{table_field_name}_{start_yr}_{end_yr}_{technology}_{selected_year}_{active_id}"
+            )
+
+    @staticmethod
+    def RenderConstructorUI(start_yr, end_yr, current_config, active_id, technology):
+        """Отрисовка формы пользовательского конструктора отчетов"""
+        import streamlit as st
+        import os
+        from logic import ReportConstructor
+
+        st.markdown("### 🛠️ Конструктор отчета Word (.docx)")
+        st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
+
+        constructor = ReportConstructor()
+        available_items = constructor.GetAvailableElements(st.session_state.plants_data, start_yr, end_yr)
+
+        with st.container(border=True):
+            st.markdown("**Шаг 1. Добавить элемент в документ**")
+            item_options = {item["label"] + (f" ({item['group']})" if item['plant_name'] else ""): item for item in
+                            available_items}
+            selected_item_label = st.selectbox("Выберите таблицу или график для вставки:",
+                                               options=list(item_options.keys()))
+            element_size = st.slider("Ширина элемента в документе (дюймы):", min_value=2.0, max_value=8.0, value=5.5,
+                                     step=0.5)
+
+            if st.button("➕ Добавить выбранный элемент в очередь отчета", use_container_width=True):
+                chosen_meta = item_options[selected_item_label]
+                st.session_state.constructor_queue.append({
+                    "key": chosen_meta["key"], "type": chosen_meta["type"], "label": chosen_meta["label"],
+                    "field_name": chosen_meta["field_name"], "plant_name": chosen_meta["plant_name"],
+                    "tech": chosen_meta.get("tech"), "year": chosen_meta.get("year"), "size": element_size
+                })
+                st.toast("Элемент добавлен в очередь отчета!")
+                st.rerun()
+
+        st.markdown("**Шаг 2. Текущая структура документа (Очередь сборки)**")
+        if not st.session_state.constructor_queue:
+            st.info("Очередь пуста. Добавьте элементы с помощью формы выше.")
+        else:
+            for idx, q_item in enumerate(st.session_state.constructor_queue):
+                q_col_text, q_col_size, q_col_del = st.columns([6.0, 2.0, 1.0])
+                with q_col_text:
+                    prefix = "📊" if q_item["type"] == "table" else "📈"
+                    plant_prefix = f"[{q_item['plant_name']}] " if q_item["plant_name"] else "[Глобальный] "
+                    st.write(f"{idx + 1}. {prefix} {plant_prefix}{q_item['label']}")
+                with q_col_size:
+                    st.caption(f"Ширина: {q_item['size']} дюйм.")
+                with q_col_del:
+                    if st.button("❌", key=f"del_q_{idx}"):
+                        st.session_state.constructor_queue.pop(idx)
+                        st.rerun()
+
+            st.divider()
+
+            btn_build_col, btn_cancel_col = st.columns(2)
+            with btn_build_col:
+                if st.button("🚀 Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
+                    with st.spinner("Идет генерация документа конструктором..."):
+                        from office import ReportDocument
+                        doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
+                        saved_file = doc_report.BuildDocumentFromQueue(
+                            constructor_queue=st.session_state.constructor_queue,
+                            plants_session_data=st.session_state.plants_data,
+                            start_yr=start_yr, end_yr=end_yr, current_config=current_config
+                        )
+                        st.session_state.report_status = f"Пользовательский отчет '{os.path.basename(saved_file)}' успешно собран!"
+                        st.session_state.constructor_queue = []
+                        st.session_state.report_mode = False
+                        st.rerun()
+
+            with btn_cancel_col:
+                if st.button("↩️ Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
+                    st.session_state.report_mode = False
+                    st.rerun()
+
+    @staticmethod
+    def RenderConstantsUI(active_id, technology, start_yr, end_yr, plant):
+        """
+        МЕТОД В ТВОЕМ СТИЛЕ: Рисует компактную форму изменения констант
+        прямо внутри левой панели управления. Без лишнего кода в app.py!
+        """
+        import streamlit as st
+
+        with st.container(border=True):
+            st.markdown("**⚙️ Корректировка констант**")
+            st.caption("Изменение порогов тепловыделения и периодов полураспада РАО по классам.")
+
+            classes = ["1 класс", "2 класс", "3 класс", "4 класс"]
+
+            # 1. Сетка полей для критериев тепловыделения (FuelClassHeatReady)
+            st.markdown("*Критерии тепловыделения (кВт/м³):*")
+            c_cols1 = st.columns(2)
+            for idx, cl in enumerate(classes):
+                with c_cols1[idx % 2]:
+                    new_heat = st.number_input(
+                        f"{cl}",
+                        value=float(st.session_state.FuelClassHeatReady[cl]),
+                        step=0.1,
+                        format="%.1f",
+                        key=f"const_heat_{cl}_{active_id}"
+                    )
+                    # Если пользователь поменял число, мгновенно фиксируем в сессионном словаре
+                    if new_heat != st.session_state.FuelClassHeatReady[cl]:
+                        st.session_state.FuelClassHeatReady[cl] = new_heat
+
+            # 2. Сетка полей для периодов полураспада (HalfLife)
+            st.markdown("*Периоды полураспада (годы):*")
+            c_cols2 = st.columns(2)
+            for idx, cl in enumerate(classes):
+                with c_cols2[idx % 2]:
+                    new_hl = st.number_input(
+                        f"{cl}",
+                        value=float(st.session_state.HalfLife[cl]),
+                        step=0.5,
+                        format="%.1f",
+                        key=f"const_hl_{cl}_{active_id}"
+                    )
+                    # Фиксируем изменения полураспада в словаре сессии
+                    if new_hl != st.session_state.HalfLife[cl]:
+                        st.session_state.HalfLife[cl] = new_hl
+
+            # Кнопка применения изменений и сквозного пересчета матриц
+            if st.button("Применить константы", use_container_width=True, type="primary",
+                         key=f"apply_const_btn_{active_id}"):
+                with st.spinner("Пересчет моделей отрасли по новым константам..."):
+                    if plant is not None:
+                        # Принудительно взводим триггер пересчета и перезапускаем CalculateMatrices
+                        st.session_state[f"need_calc_{active_id}"] = True
+                        plant.CalculateMatrices(technology=technology, start_year=start_yr, end_year=end_yr)
+
+                    st.toast("Константы успешно обновлены! Модели Т7 пересчитаны.")
+                    st.rerun()
