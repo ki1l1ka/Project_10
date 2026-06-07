@@ -8,14 +8,34 @@ from office import ReportDocument
 if 'report_mode' not in st.session_state:
     st.session_state.report_mode = False
 if 'constructor_queue' not in st.session_state:
-    st.session_state.constructor_queue = []-
+    st.session_state.constructor_queue = []
 if 'FuelClassHeatReady' not in st.session_state:
-    st.session_state.FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2, "4 класс": 0.3}
+    st.session_state.FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2}
 
 if 'HalfLife' not in st.session_state:
-    st.session_state.HalfLife = {"1 класс": 3.0, "2 класс": 3.0, "3 класс": 3.0, "4 класс": 3.0}
+    st.session_state.HalfLife = {"1 класс": 10.7, "2 класс": 50.0, "3 класс": 5.0}
 if 'show_constants_popup' not in st.session_state:
     st.session_state.show_constants_popup = False
+if 'report_status' not in st.session_state:
+    st.session_state.report_status = ""
+# путь
+if 'plants_data' not in st.session_state:
+    st.session_state.plants_data = {
+        1: {
+            "name": "Завод 1",
+            "folder_path": "Завод 1",
+            "technology": 1,
+            "start_yr": 2030,
+            "end_yr": 2100,
+            "selected_reactors": ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК'],
+            "current_min_pct": 50,
+            "current_max_pct": 150
+        }
+    }
+if 'active_plant_id' not in st.session_state:
+    st.session_state.active_plant_id = 1
+if 'next_plant_id' not in st.session_state:
+    st.session_state.next_plant_id = 2
 # Настройка страницы
 st.set_page_config(page_title="РАО Аналитика", layout="wide")
 
@@ -70,47 +90,41 @@ st.markdown("""
     }
     </style>
     """, unsafe_allow_html=True)
+
+
 def load_base_excel_files(folder_name, plant_name):
-    # Полный путь к папке завода
-    full_path = os.path.join("excel", folder_name)
-    if not os.path.exists(os.path.join("excel", "t1.xlsx")):
-        st.error("Ошибка: Общая таблица t1.xlsx отсутствует в корне папки 'excel'!")
-        return None
+    # ИСПРАВЛЕНИЕ В ТВОЕМ СТИЛЕ: Защита от дублирования папки 'excel'
+    # Убираем лишние пробелы и приводим слэши к одному виду для проверки
+    clean_folder = folder_name.strip().replace("\\", "/")
+
+    # Если строка начинается с "excel/", значит путь уже полный
+    if clean_folder.startswith("excel/"):
+        full_path = folder_name
+    elif clean_folder == "excel":
+        full_path = "excel"
+    else:
+        # Если это просто имя папки (например, "Завод 1"), склеиваем с корнем excel
+        full_path = os.path.join("excel", folder_name)
+
+    # Проверка на существование папки
     if not os.path.exists(full_path):
         st.error(f"Ошибка: Папка '{full_path}' не найдена в директории 'excel'!")
         return None
+
     try:
-        # Проверяем файлы t2, t3, t4 внутри папки
+        # Проверяем файлы t2, t3, t4 внутри индивидуальной папки
         for name in ['t2', 't3', 't4']:
             if not os.path.exists(os.path.join(full_path, f"{name}.xlsx")):
-                st.error(f"В папке завода 'excel/{folder_name}' отсутствует обязательный файл {name}.xlsx")
+                st.error(f"В папке завода '{full_path}' отсутствует обязательный файл {name}.xlsx")
                 return None
-        # Создаем объект завода
+
         plant_obj = ProcessingPlant(name=plant_name, folder_path=full_path)
         return plant_obj
     except Exception as e:
         st.error(f"Ошибка инициализации завода из папки '{full_path}': {e}")
         return None
-if 'report_status' not in st.session_state:
-    st.session_state.report_status = ""
-# путь
-if 'plants_data' not in st.session_state:
-    st.session_state.plants_data = {
-        1: {
-            "name": "Завод 1",
-            "folder_path": "Завод 1",
-            "technology": 1,
-            "start_yr": 2030,
-            "end_yr": 2050,
-            "selected_reactors": ['ВВЭР-1000', 'ВВЭР-440', 'БН-600', 'БН-800', 'РБМК'],
-            "current_min_pct": 50,
-            "current_max_pct": 150
-        }
-    }
-if 'active_plant_id' not in st.session_state:
-    st.session_state.active_plant_id = 1
-if 'next_plant_id' not in st.session_state:
-    st.session_state.next_plant_id = 2
+
+
 with st.container():
     num_plants = len(st.session_state.plants_data)
     top_cols = st.columns([1.5, 3.5] + [1.0] * num_plants + [1.0])
@@ -189,7 +203,7 @@ with col_left:
     # Слайдер для времиени (пока не используем)
     start_yr, end_yr = st.slider(
         "Временной диапазон (годы):",
-        min_value=2030, max_value=2050,
+        min_value=2030, max_value=2100,
         value=(current_config["start_yr"], current_config["end_yr"]),
         step=1,
         key=f"slider_{active_id}",
@@ -313,8 +327,15 @@ with col_center:
                         active_table_obj = active_table_obj.get(technology)
                     else:
                         pass
-        tab_table, tab_graph, tab_sensitivity, tab_burial_graph = st.tabs(
-            ["Табличный вид", "Графическое отображение", "Анализ чувствительности", "Заполнение ПЗРО (График)"]
+        # ИСПРАВЛЕНИЕ БАГА: Ровно 5 переменных слева и ровно 5 названий в списке справа!
+        tab_table, tab_graph, tab_sensitivity, tab_burial_graph, tab_capacity_analysis = st.tabs(
+            [
+                "Табличный вид",
+                "Графическое отображение",
+                "Анализ чувствительности",
+                "Заполнение ПЗРО (График)",
+                "Анализ мощностей"
+            ]
         )
         with tab_table:
             InterfaceRenderer.RenderTableUI(
@@ -394,6 +415,84 @@ with col_center:
                 st.markdown("#### Пункт приповерхностного захоронения РАО (ППЗР)")
                 st.pyplot(fig_ppzr, clear_figure=True)
                 plt.close(fig_ppzr)
+    # --- НОВАЯ ВКЛАДКА: КОМПЛЕКСНЫЙ АНАЛИЗ МОЩНОСТЕЙ ОТРАСЛИ (Внутри app.py) ---
+    with tab_capacity_analysis:
+        st.markdown("### Системный анализ мощностей переработки и захоронения")
+        st.caption(
+            "Внимание: В связи с регламентом заполнения исходных данных, анализ ограничен периодом 2030–2050 гг.")
+
+        if plant is not None:
+            # Импортируем наши чистые расчетные функции из logic.py
+            from logic import GetCapacityAnalysisData, GetBurialVsCapacityData
+
+            # ------------------------------------------------------------------
+            # ГРАФИК 1. Наработка ОЯТ (Т1) vs Суммарная загрузка заводов (Т2)
+            # ------------------------------------------------------------------
+            st.markdown("#### 1. Баланс наработки ОЯТ и мощностей регенерации")
+            st.caption(
+                "Сравнение суммарного годового образования ОЯТ по всем реакторам (Т1) и фактической суммарной загрузки всех заводов (Т2).")
+
+            cap_data = GetCapacityAnalysisData(st.session_state.plants_data, start_yr, end_yr)
+
+            fig_cap1, ax_cap1 = plt.subplots(figsize=(9, 3.8))
+            ax_cap1.plot(cap_data["years"], cap_data["t1_total"], linestyle='-', marker='o', color='#d9534f',
+                         label="Образование ОЯТ (Т1, всего тонн)", linewidth=2.5)
+            ax_cap1.plot(cap_data["years"], cap_data["t2_total_sum"], linestyle='--', marker='s', color='#2a6496',
+                         label="Загрузка переработки (Т2, сумма заводов)", linewidth=2.0)
+
+            ax_cap1.set_xlabel("Годы", fontsize=9)
+            ax_cap1.set_ylabel("Масса ОЯТ, тонн ТМ", fontsize=9)
+            ax_cap1.grid(True, linestyle='--', alpha=0.4)
+            ax_cap1.xaxis.set_major_locator(MultipleLocator(5))
+            ax_cap1.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=9)
+            plt.tight_layout()
+
+            st.pyplot(fig_cap1, clear_figure=True)
+            plt.close(fig_cap1)
+
+            st.divider()
+
+            # ------------------------------------------------------------------
+            # ГРАФИК 2. Темпы загрузки хранилищ vs Суммарная загрузка Т2
+            # ------------------------------------------------------------------
+            st.markdown("#### 2. Сопоставление объемов переработки и темпов кондиционирования РАО")
+            st.caption(
+                "Сравнение суммарной переработки ОЯТ на заводах (тонны) и результирующего потока кондиционированного РАО, готового к изоляции (кубометры, сумма 1–4 классов из Т7).")
+
+            burial_vs_cap = GetBurialVsCapacityData(st.session_state.plants_data, start_yr, end_yr)
+
+            fig_cap2, ax_cap2 = plt.subplots(figsize=(9, 3.8))
+
+            # Используем две оси Y (двойная шкала), так как тонны и кубометры имеют разный масштаб!
+            ax_cap2_left = ax_cap2
+            ax_cap2_right = ax_cap2.twinx()
+
+            # Левая шкала: Тонны ОЯТ
+            line1 = ax_cap2_left.plot(burial_vs_cap["years"], burial_vs_cap["total_t2"], linestyle='-', marker='^',
+                                      color='#2a6496', label="Переработка ОЯТ (Т2, тонн)", linewidth=2.0)
+            ax_cap2_left.set_ylabel("Загрузка заводов, тонн ТМ", color='#2a6496', fontsize=9)
+            ax_cap2_left.tick_params(axis='y', labelcolor='#2a6496')
+
+            # Правая шкала: Кубометры готового РАО
+            line2 = ax_cap2_right.plot(burial_vs_cap["years"], burial_vs_cap["total_burial_ready"], linestyle='-',
+                                       marker='s', color='#2b702b', label="Готово к захоронению РАО (Т7, м³)",
+                                       linewidth=2.0)
+            ax_cap2_right.set_ylabel("Поток готового РАО, м³", color='#2b702b', fontsize=9)
+            ax_cap2_right.tick_params(axis='y', labelcolor='#2b702b')
+
+            ax_cap2_left.set_xlabel("Годы", fontsize=9)
+            ax_cap2_left.grid(True, linestyle='--', alpha=0.4)
+            ax_cap2_left.xaxis.set_major_locator(MultipleLocator(5))
+
+            # Объединяем легенды двух осей в одну общую
+            lines = line1 + line2
+            labels = [l.get_label() for l in lines]
+            ax_cap2_left.legend(lines, labels, loc='upper left', bbox_to_anchor=(1.1, 1), fontsize=9)
+            plt.tight_layout()
+
+            st.pyplot(fig_cap2, clear_figure=True)
+            plt.close(fig_cap2)
+
 # Правая колонка
 with col_right:
     st.markdown("### Параметры конфигурации")

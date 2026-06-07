@@ -144,7 +144,6 @@ class ReportDocument:
         return filename
 
     def BuildDocumentFromQueue(self, constructor_queue, plants_session_data, start_yr, end_yr, current_config):
-
         for elem in constructor_queue:
             plant_title = f"Завод: {elem['plant_name']} | " if elem['plant_name'] else ""
             self.AddHeading(f"{plant_title}{elem['label']}", level=1)
@@ -157,7 +156,6 @@ class ReportDocument:
                             current_plant_obj.CalculateMatrices(p_info["technology"], p_info["start_yr"],
                                                                 p_info["end_yr"])
                         break
-
             # Сборка таблицы в отчет
             if elem["type"] == "table":
                 target_table = None

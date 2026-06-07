@@ -10,7 +10,7 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
-FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2, "4 класс": 0.3}
+FuelClassHeatReady = {"1 класс": 2.0, "2 класс": 0.5, "3 класс": 1.2}
 # Создание таблицы
 def TableExcel(FileName):
     df = pd.read_excel(f"excel/{FileName}.xlsx", header=None)
@@ -51,7 +51,9 @@ class Cell:
 class Table:
     def __init__(self, table=[['', ''], ['', '']], description='Таблица'):
         self.description = description
-        self.matrix = [[Cell(table[row][column]) for column in range(len(table[rows]))] for row in range(len(table))]
+        # rows = len(table)
+        # cols = len(table[0])
+        self.matrix = [[Cell(table[row][column]) for column in range(len(table[row]))] for row in range(len(table))]
     def ToTable(self):
         return [[self.matrix[row][cell] for row in range(len(self.matrix))] for cell in range(len(self.matrix[0]))]
     def Show(self):
@@ -231,8 +233,7 @@ class CreatedTable(Table):
         ColClass1 = 1
         ColClass2 = 3
         ColClass3 = 5
-        ColClass4 = 7
-        FuelClasses = ["1 класс", "2 класс", "3 класс", "4 класс"]
+        FuelClasses = ["1 класс", "2 класс", "3 класс"]
         table7.DeleteRow()
         for i in range(startyear, endyear + 1):
             table7.AddRow()
@@ -263,7 +264,7 @@ class CreatedTable(Table):
         headers = {
             't5': ['Завод', '1 класс', '2 класс', '3 класс', '4 класс'],
             't7': ["Год", '1 класс', "Готово к захоронению", '2 класс', "Готово к захоронению", '3 класс',
-                   "Готово к захоронению", '4 класс', "Готово к захоронению"]
+                   "Готово к захоронению"]
         }
         lines = {'t5': ['Завод'] + all_reactors}
 
@@ -394,9 +395,7 @@ class ProcessingPlant:
             "t7": ["Год",
                 "1 класс", "Готово к захоронению",
                 "2 класс", "Готово к захоронению",
-                "3 класс", "Готово к захоронению",
-                "4 класс", "Готово к захоронению"
-            ],
+                "3 класс", "Готово к захоронению"],
         }
 
         lines = {"t5": ["Завод"] + all_reactors, "t6": ["Завод", "..."]}
@@ -422,19 +421,22 @@ class ProcessingPlant:
                 year=y,
                 technology=technology,
             )
-        # Считаем итоговую Т7
+        # Расчет итоговой Т7 для выбранной технологии (Внутри logic.py)
         self.t7[technology] = CreatedTable(
             TableCreate(headers["t7"]),
-            description=f"Количество РАО накопительным итогом — {self.name}",
+            description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
         )
+        # ИСПРАВЛЕНИЕ: Передаем параметры лет start_year и end_year напрямую,
+        # убирая любые ошибочные упоминания переменной 'rows'!
         self.t7[technology].T7Create(
             self.t4,
             self.t5_series[technology],
             self.t7[technology],
             technology=technology,
             startyear=start_year,
-            endyear=end_year,
+            endyear=end_year
         )
+
     def RunSensitivityAnalysis(self, technology, start_year, end_year, min_pct, max_pct):
         coefficients = [x / 100.0 for x in range(min_pct, max_pct + 1, 5)]
         ready_volumes = []
@@ -448,7 +450,7 @@ class ProcessingPlant:
                 "2 класс",
                 "Готово к захоронению",
                 "3 класс",
-                "Готово к захоронению",
+                "Готово к захоронению"
             ],
         }
         lines = {"t5": ["Завод"] + all_reactors}
@@ -556,17 +558,15 @@ class NuclearDataVisualizer:
         plot_data = {
             "1 класс (Всего)": [], "1 класс (Готово)": [],
             "2 класс (Всего)": [], "2 класс (Готово)": [],
-            "3 класс (Всего)": [], "3 класс (Готово)": [],
-            "4 класс (Всего)": [], "4 класс (Готово)": []
-        }# Сейчас учитывается и 4-й класс
+            "3 класс (Всего)": [], "3 класс (Готово)": []
+        }# Сейчас не учитывается 4-й класс
 
         if active_t7_obj is None or not hasattr(active_t7_obj, 'matrix'):
             return plot_data
         config = [
             (1, 2, "1 класс"),
             (3, 4, "2 класс"),
-            (5, 6, "3 класс"),
-            (7, 8, "4 класс")
+            (5, 6, "3 класс")
         ]
         for col_all, col_ready, class_key in config:
             for r in range(1, len(active_t7_obj.matrix)):
@@ -593,8 +593,7 @@ class NuclearDataVisualizer:
         colors = {
             "1 класс (Всего)": "#d9534f", "1 класс (Готово)": "#942a27",
             "2 класс (Всего)": "#f0ad4e", "2 класс (Готово)": "#b57d28",
-            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b",
-            "4 класс (Всего)": "#5bc0de", "4 класс (Готово)": "#2a6496"
+            "3 класс (Всего)": "#5cb85c", "3 класс (Готово)": "#2b702b"
         }
 
         for label_name, y_values in t7_data.items():
@@ -1199,7 +1198,7 @@ class InterfaceRenderer:
             st.markdown("**⚙️ Корректировка констант**")
             st.caption("Изменение порогов тепловыделения и периодов полураспада РАО по классам.")
 
-            classes = ["1 класс", "2 класс", "3 класс", "4 класс"]
+            classes = ["1 класс", "2 класс", "3 класс"]
 
             # 1. Сетка полей для критериев тепловыделения (FuelClassHeatReady)
             st.markdown("*Критерии тепловыделения (кВт/м³):*")
@@ -1244,3 +1243,112 @@ class InterfaceRenderer:
 
                     st.toast("Константы успешно обновлены! Модели Т7 пересчитаны.")
                     st.rerun()
+
+
+def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
+    """
+    МЕТОД В ТВОЕМ СТИЛЕ: Чистый расчет для Графика 1 (Анализ мощностей).
+    Сравнивает глобальную наработку ОЯТ (Т1) и сумму загрузок (Т2) по всем заводам по годам.
+    """
+    analysis_data = {"years": [], "t1_total": [], "t2_total_sum": []}
+
+    # Жестко ограничиваем 2050 годом, пока Завод 2 не продлен
+    final_end_year = min(end_yr, 2050)
+
+    # Берем первый попавшийся завод, чтобы дотянуться до общей таблицы Т1
+    first_plant = None
+    for p_id in plants_session_dict.keys():
+        import streamlit as st
+        if f"plant_object_{p_id}" in st.session_state:
+            first_plant = st.session_state[f"plant_object_{p_id}"]
+            break
+
+    for yr in range(start_yr, final_end_year + 1):
+        analysis_data["years"].append(yr)
+
+        # 1. Считаем суммарную наработку ОЯТ из общей Т1 за этот год (сумма по всем реакторам)
+        t1_sum = 0.0
+        if first_plant is not None and first_plant.t1 is not None:
+            # Ищем строку года в Т1 (год в колонке 0)
+            for r in range(1, len(first_plant.t1.matrix)):
+                if first_plant.t1.matrix[r][0].value == yr:
+                    # Суммируем значения по всем реакторам (колонки с 1 по 5)
+                    for c in range(1, len(first_plant.t1.matrix[r])):
+                        val = first_plant.t1.matrix[r][c].value
+                        t1_sum += float(val) if val is not None else 0.0
+                    break
+        analysis_data["t1_total"].append(t1_sum)
+
+        # 2. Считаем сумму загрузок Т2 по ВСЕМ заводам отрасли за этот год
+        t2_plants_sum = 0.0
+        for p_id, p_info in plants_session_dict.items():
+            import streamlit as st
+            plant_key = f"plant_object_{p_id}"
+            if plant_key in st.session_state and st.session_state[plant_key] is not None:
+                p_obj = st.session_state[plant_key]
+                if p_obj.t2 is not None:
+                    for r in range(1, len(p_obj.t2.matrix)):
+                        if p_obj.t2.matrix[r][0].value == yr:
+                            # Суммируем загрузку всех реакторов на этом заводе (колонки 1-5)
+                            for c in range(1, len(p_obj.t2.matrix[r])):
+                                val = p_obj.t2.matrix[r][c].value
+                                t2_plants_sum += float(val) if val is not None else 0.0
+                            break
+        analysis_data["t2_total_sum"].append(t2_plants_sum)
+
+    return analysis_data
+
+
+def GetBurialVsCapacityData(plants_session_dict, start_yr, end_yr=2050):
+    """
+    МЕТОД В ТВОЕМ СТИЛЕ: Чистый расчет для Графика 2 (Темпы захоронений vs Загрузка).
+    Сравнивает ежегодный суммарный приток готового к захоронению РАО (из Т7) и суммарную загрузку Т2.
+    """
+    analysis_data = {"years": [], "total_t2": [], "total_burial_ready": []}
+    final_end_year = min(end_yr, 2050)
+
+    for yr in range(start_yr, final_end_year + 1):
+        analysis_data["years"].append(yr)
+
+        # 1. Считаем суммарную загрузку Т2 по всем заводам за текущий год
+        t2_sum = 0.0
+        # 2. Считаем суммарный приток готового к финальной изоляции РАО (всех классов 1-4 из Т7)
+        burial_sum = 0.0
+
+        for p_id, p_info in plants_session_dict.items():
+            import streamlit as st
+            plant_key = f"plant_object_{p_id}"
+            if plant_key in st.session_state and st.session_state[plant_key] is not None:
+                p_obj = st.session_state[plant_key]
+                tech = p_info["technology"]
+
+                # Извлекаем Т2 загрузку
+                if p_obj.t2 is not None:
+                    for r in range(1, len(p_obj.t2.matrix)):
+                        if p_obj.t2.matrix[r][0].value == yr:
+                            for c in range(1, len(p_obj.t2.matrix[r])):
+                                val = p_obj.t2.matrix[r][c].value
+                                t2_sum += float(val) if val is not None else 0.0
+                            break
+
+                # Извлекаем Т7 готовые кубометры отходов
+                t7_dict = getattr(p_obj, "t7", {})
+                t7_obj = t7_dict.get(tech) if isinstance(t7_dict, dict) else None
+                if t7_obj is not None and hasattr(t7_obj, 'matrix'):
+                    for r in range(1, len(t7_obj.matrix)):
+                        if t7_obj.matrix[r][0].value == yr:
+                            matrix_row = t7_obj.matrix[r]
+                            # Четные колонки в Т7: 2 (1кл), 4 (2кл), 6 (3кл) и 8 (4кл) — это объемы "Готово"
+                            columns_to_check = [2, 4, 6]
+                            if len(matrix_row) > 8:
+                                columns_to_check.append(8)
+
+                            for col_idx in columns_to_check:
+                                val = matrix_row[col_idx].value
+                                burial_sum += float(val) if val is not None else 0.0
+                            break
+
+        analysis_data["total_t2"].append(t2_sum)
+        analysis_data["total_burial_ready"].append(burial_sum)
+
+    return analysis_data
