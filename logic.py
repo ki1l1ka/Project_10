@@ -299,8 +299,6 @@ class CreatedTable(Table):
 
         percentages = [int(c * 100) for c in coefficients]
         return percentages, ready_volumes_2050
-
-
 class Graph:
     def __init__(self, table=None, column=False, row=False):
         self.graph = dict()
@@ -426,8 +424,6 @@ class ProcessingPlant:
             TableCreate(headers["t7"]),
             description=f"Количество РАО накопительным итогом (Технология {technology}) — {self.name}",
         )
-        # ИСПРАВЛЕНИЕ: Передаем параметры лет start_year и end_year напрямую,
-        # убирая любые ошибочные упоминания переменной 'rows'!
         self.t7[technology].T7Create(
             self.t4,
             self.t5_series[technology],
@@ -1116,12 +1112,11 @@ class InterfaceRenderer:
 
     @staticmethod
     def RenderConstructorUI(start_yr, end_yr, current_config, active_id, technology):
-        """Отрисовка формы пользовательского конструктора отчетов"""
         import streamlit as st
         import os
         from logic import ReportConstructor
 
-        st.markdown("### 🛠️ Конструктор отчета Word (.docx)")
+        st.markdown("### Конструктор отчета Word (.docx)")
         st.caption("Выберите элементы программы, настройте их масштаб и порядок для записи в итоговый документ.")
 
         constructor = ReportConstructor()
@@ -1167,7 +1162,7 @@ class InterfaceRenderer:
 
             btn_build_col, btn_cancel_col = st.columns(2)
             with btn_build_col:
-                if st.button("🚀 Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
+                if st.button("Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
                     with st.spinner("Идет генерация документа конструктором..."):
                         from office import ReportDocument
                         doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
@@ -1182,25 +1177,21 @@ class InterfaceRenderer:
                         st.rerun()
 
             with btn_cancel_col:
-                if st.button("↩️ Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
+                if st.button("↩Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
                     st.session_state.report_mode = False
                     st.rerun()
 
     @staticmethod
     def RenderConstantsUI(active_id, technology, start_yr, end_yr, plant):
-        """
-        МЕТОД В ТВОЕМ СТИЛЕ: Рисует компактную форму изменения констант
-        прямо внутри левой панели управления. Без лишнего кода в app.py!
-        """
         import streamlit as st
 
         with st.container(border=True):
-            st.markdown("**⚙️ Корректировка констант**")
+            st.markdown("** Корректировка констант**")
             st.caption("Изменение порогов тепловыделения и периодов полураспада РАО по классам.")
 
             classes = ["1 класс", "2 класс", "3 класс"]
 
-            # 1. Сетка полей для критериев тепловыделения (FuelClassHeatReady)
+            # Cетка полей для критериев тепловыделения (FuelClassHeatReady)
             st.markdown("*Критерии тепловыделения (кВт/м³):*")
             c_cols1 = st.columns(2)
             for idx, cl in enumerate(classes):
@@ -1246,13 +1237,8 @@ class InterfaceRenderer:
 
 
 def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
-    """
-    МЕТОД В ТВОЕМ СТИЛЕ: Чистый расчет для Графика 1 (Анализ мощностей).
-    Сравнивает глобальную наработку ОЯТ (Т1) и сумму загрузок (Т2) по всем заводам по годам.
-    """
     analysis_data = {"years": [], "t1_total": [], "t2_total_sum": []}
-
-    # Жестко ограничиваем 2050 годом, пока Завод 2 не продлен
+    # ограничиваем 2050 годом, пока Завод 2 не продлен
     final_end_year = min(end_yr, 2050)
 
     # Берем первый попавшийся завод, чтобы дотянуться до общей таблицы Т1
@@ -1272,14 +1258,12 @@ def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
             # Ищем строку года в Т1 (год в колонке 0)
             for r in range(1, len(first_plant.t1.matrix)):
                 if first_plant.t1.matrix[r][0].value == yr:
-                    # Суммируем значения по всем реакторам (колонки с 1 по 5)
+                    # Суммируем значения по всем реакторам
                     for c in range(1, len(first_plant.t1.matrix[r])):
                         val = first_plant.t1.matrix[r][c].value
                         t1_sum += float(val) if val is not None else 0.0
                     break
         analysis_data["t1_total"].append(t1_sum)
-
-        # 2. Считаем сумму загрузок Т2 по ВСЕМ заводам отрасли за этот год
         t2_plants_sum = 0.0
         for p_id, p_info in plants_session_dict.items():
             import streamlit as st
@@ -1290,29 +1274,18 @@ def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
                     for r in range(1, len(p_obj.t2.matrix)):
                         if p_obj.t2.matrix[r][0].value == yr:
                             # Суммируем загрузку всех реакторов на этом заводе (колонки 1-5)
-                            for c in range(1, len(p_obj.t2.matrix[r])):
-                                val = p_obj.t2.matrix[r][c].value
-                                t2_plants_sum += float(val) if val is not None else 0.0
+                            for c in range(2, len(first_plant.t1.matrix[r])):
+                                val = first_plant.t1.matrix[r][c].value
+                                t1_sum += float(val) if not math.isnan(val) else 0.0
                             break
         analysis_data["t2_total_sum"].append(t2_plants_sum)
-
     return analysis_data
-
-
 def GetBurialVsCapacityData(plants_session_dict, start_yr, end_yr=2050):
-    """
-    МЕТОД В ТВОЕМ СТИЛЕ: Чистый расчет для Графика 2 (Темпы захоронений vs Загрузка).
-    Сравнивает ежегодный суммарный приток готового к захоронению РАО (из Т7) и суммарную загрузку Т2.
-    """
     analysis_data = {"years": [], "total_t2": [], "total_burial_ready": []}
     final_end_year = min(end_yr, 2050)
-
     for yr in range(start_yr, final_end_year + 1):
         analysis_data["years"].append(yr)
-
-        # 1. Считаем суммарную загрузку Т2 по всем заводам за текущий год
         t2_sum = 0.0
-        # 2. Считаем суммарный приток готового к финальной изоляции РАО (всех классов 1-4 из Т7)
         burial_sum = 0.0
 
         for p_id, p_info in plants_session_dict.items():
