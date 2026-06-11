@@ -1044,7 +1044,7 @@ class InterfaceRenderer:
 
             btn_build_col, btn_cancel_col = st.columns(2)
             with btn_build_col:
-                if st.button("🚀 Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
+                if st.button("Сгенерировать и сохранить отчет Word", use_container_width=True, type="primary"):
                     with st.spinner("Идет генерация документа конструктором..."):
                         from office import ReportDocument
                         doc_report = ReportDocument(title="Аналитический комплекс: Пользовательский отчет")
@@ -1059,7 +1059,7 @@ class InterfaceRenderer:
                         st.rerun()
 
             with btn_cancel_col:
-                if st.button("↩️ Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
+                if st.button("↩Закрыть конструктор (Вернуться к таблицам)", use_container_width=True):
                     st.session_state.report_mode = False
                     st.rerun()
 
@@ -1188,7 +1188,6 @@ class InterfaceRenderer:
         with st.container(border=True):
             st.markdown("** Корректировка констант**")
             st.caption("Изменение порогов тепловыделения и периодов полураспада РАО по классам.")
-
             classes = ["1 класс", "2 класс", "3 класс"]
 
             # Cетка полей для критериев тепловыделения (FuelClassHeatReady)
@@ -1203,11 +1202,9 @@ class InterfaceRenderer:
                         format="%.1f",
                         key=f"const_heat_{cl}_{active_id}"
                     )
-                    # Если пользователь поменял число, мгновенно фиксируем в сессионном словаре
+                    # Если пользователь поменял число, мгновенно фиксируем в словаре
                     if new_heat != st.session_state.FuelClassHeatReady[cl]:
                         st.session_state.FuelClassHeatReady[cl] = new_heat
-
-            # 2. Сетка полей для периодов полураспада (HalfLife)
             st.markdown("*Периоды полураспада (годы):*")
             c_cols2 = st.columns(2)
             for idx, cl in enumerate(classes):
@@ -1234,8 +1231,6 @@ class InterfaceRenderer:
 
                     st.toast("Константы успешно обновлены! Модели Т7 пересчитаны.")
                     st.rerun()
-
-
 def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
     analysis_data = {"years": [], "t1_total": [], "t2_total_sum": []}
     # ограничиваем 2050 годом, пока Завод 2 не продлен
@@ -1248,11 +1243,8 @@ def GetCapacityAnalysisData(plants_session_dict, start_yr, end_yr=2050):
         if f"plant_object_{p_id}" in st.session_state:
             first_plant = st.session_state[f"plant_object_{p_id}"]
             break
-
     for yr in range(start_yr, final_end_year + 1):
         analysis_data["years"].append(yr)
-
-        # 1. Считаем суммарную наработку ОЯТ из общей Т1 за этот год (сумма по всем реакторам)
         t1_sum = 0.0
         if first_plant is not None and first_plant.t1 is not None:
             # Ищем строку года в Т1 (год в колонке 0)
@@ -1303,7 +1295,6 @@ def GetBurialVsCapacityData(plants_session_dict, start_yr, end_yr=2050):
                                 val = p_obj.t2.matrix[r][c].value
                                 t2_sum += float(val) if val is not None else 0.0
                             break
-
                 # Извлекаем Т7 готовые кубометры отходов
                 t7_dict = getattr(p_obj, "t7", {})
                 t7_obj = t7_dict.get(tech) if isinstance(t7_dict, dict) else None
@@ -1320,8 +1311,6 @@ def GetBurialVsCapacityData(plants_session_dict, start_yr, end_yr=2050):
                                 val = matrix_row[col_idx].value
                                 burial_sum += float(val) if val is not None else 0.0
                             break
-
         analysis_data["total_t2"].append(t2_sum)
         analysis_data["total_burial_ready"].append(burial_sum)
-
     return analysis_data

@@ -93,26 +93,20 @@ st.markdown("""
 
 
 def load_base_excel_files(folder_name, plant_name):
-    # ИСПРАВЛЕНИЕ В ТВОЕМ СТИЛЕ: Защита от дублирования папки 'excel'
-    # Убираем лишние пробелы и приводим слэши к одному виду для проверки
     clean_folder = folder_name.strip().replace("\\", "/")
-
-    # Если строка начинается с "excel/", значит путь уже полный
     if clean_folder.startswith("excel/"):
         full_path = folder_name
     elif clean_folder == "excel":
         full_path = "excel"
     else:
-        # Если это просто имя папки (например, "Завод 1"), склеиваем с корнем excel
         full_path = os.path.join("excel", folder_name)
-
-    # Проверка на существование папки
+    # существование папки
     if not os.path.exists(full_path):
         st.error(f"Ошибка: Папка '{full_path}' не найдена в директории 'excel'!")
         return None
 
     try:
-        # Проверяем файлы t2, t3, t4 внутри индивидуальной папки
+        # Проверяем файлы t2, t3, t4 внутри папки завода
         for name in ['t2', 't3', 't4']:
             if not os.path.exists(os.path.join(full_path, f"{name}.xlsx")):
                 st.error(f"В папке завода '{full_path}' отсутствует обязательный файл {name}.xlsx")
